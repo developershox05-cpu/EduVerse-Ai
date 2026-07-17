@@ -1,0 +1,103 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "User statistics and profile data",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "eduCoins": { "type": "integer" },
+        "dailyUsageMinutes": { "type": "integer" },
+        "isPremium": { "type": "boolean" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["uid", "email", "displayName", "photoURL", "eduCoins", "dailyUsageMinutes", "isPremium", "createdAt"]
+    },
+    "Book": {
+      "title": "Book",
+      "description": "Educational book details",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "details": { "type": "string" },
+        "coverUrl": { "type": "string" },
+        "pdfLink": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["title", "description", "coverUrl", "pdfLink", "createdAt"]
+    },
+    "Lesson": {
+      "title": "Lesson",
+      "description": "Sleek YouTube lesson reference",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "youtubeUrl": { "type": "string" },
+        "views": { "type": "array" },
+        "viewsCount": { "type": "integer" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["title", "description", "youtubeUrl", "views", "viewsCount", "createdAt"]
+    },
+    "Podcast": {
+      "title": "Podcast",
+      "description": "Podcast references with view count",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "youtubeUrl": { "type": "string" },
+        "views": { "type": "array" },
+        "viewsCount": { "type": "integer" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["title", "description", "youtubeUrl", "views", "viewsCount", "createdAt"]
+    },
+    "Post": {
+      "title": "Post",
+      "description": "Community post",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "authorName": { "type": "string" },
+        "authorPhoto": { "type": "string" },
+        "text": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "likes": { "type": "array" },
+        "likesCount": { "type": "integer" },
+        "views": { "type": "array" },
+        "viewsCount": { "type": "integer" },
+        "createdAt": { "type": "string" },
+        "commentsCount": { "type": "integer" }
+      },
+      "required": ["userId", "authorName", "authorPhoto", "text", "likes", "likesCount", "views", "viewsCount", "createdAt", "commentsCount"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Individual user statistics and settings"
+    },
+    "/books/{bookId}": {
+      "schema": "Book",
+      "description": "Collection of learning books"
+    },
+    "/lessons/{lessonId}": {
+      "schema": "Lesson",
+      "description": "Educational lessons"
+    },
+    "/podcasts/{podcastId}": {
+      "schema": "Podcast",
+      "description": "Sleek podcasts"
+    },
+    "/posts/{postId}": {
+      "schema": "Post",
+      "description": "Community posts feed"
+    }
+  }
+}
