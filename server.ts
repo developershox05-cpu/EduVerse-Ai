@@ -115,7 +115,8 @@ app.post("/api/chat", async (req, res) => {
 
     if (!apiKey || apiKey === "MY_GEMINI_API_KEY" || apiKey.trim() === "") {
       // Use intelligent educational fallback
-      const fallbackText = getSmartFallbackResponse(message, false);
+      const fallbackText = getSmartFallbackResponse(message, false) + 
+        "\n\n*(Eslatma: Haqiqiy Ustoz AI bilan jonli suhbatlashish uchun, o'ng tomondagi 'Settings > Secrets' bo'limida GEMINI_API_KEY o'rnatilganligini tekshiring.)*";
       return res.json({ text: fallbackText });
     }
 
@@ -123,50 +124,51 @@ app.post("/api/chat", async (req, res) => {
       const ai = getGeminiClient();
       const contents: any[] = [];
 
-      // Add conversational history if present
-      if (history && Array.isArray(history)) {
-        history.forEach((h: { role: string; content: string }) => {
-          contents.push({
-            role: h.role === "user" ? "user" : "model",
-            parts: [{ text: h.content }],
-          });
+    // Add conversational history if present
+    if (history && Array.isArray(history)) {
+      history.forEach((h: { role: string; content: string }) => {
+        contents.push({
+          role: h.role === "user" ? "user" : "model",
+          parts: [{ text: h.content }],
         });
-      }
+      });
+    }
 
-      // Prepare active input
-      const parts: any[] = [];
-      
-      // Add file inline data if uploaded
-      if (file && file.data && file.mimeType) {
-        parts.push({
-          inlineData: {
-            mimeType: file.mimeType,
-            data: file.data.split(",")[1] || file.data, // Strip data URL prefix if exists
-          },
-        });
-      }
-
-      parts.push({ text: message });
-      contents.push({ role: "user", parts });
-
-      const systemInstruction = 
-        "Siz EduVerse AI platformasining 'Ustoz AI' chat yordamchisiz. Vazifangiz o'quvchilarga xohlagan fanlari (matematika, fizika, kimyo, tarix, ingliz tili, CEFR, SAT, IELTS va h.k.) bo'yicha juda tushunarli, aniq va qiziqarli dars o'tish, savollariga javob berishdir. Har doim o'zbek tilida, juda samimiy va rag'batlantiruvchi ohangda javob bering. O'quvchiga yo'l ko'rsating va zarur hollarda misollar keltiring. Agar o'quvchi rasm yoki fayl yuborgan bo'lsa, uni ham tahlil qilib darsga qo'shib tushuntiring.";
-
-      const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
-        contents: contents,
-        config: {
-          systemInstruction: systemInstruction,
-          temperature: 0.8,
+    // Prepare active input
+    const parts: any[] = [];
+    
+    // Add file inline data if uploaded
+    if (file && file.data && file.mimeType) {
+      parts.push({
+        inlineData: {
+          mimeType: file.mimeType,
+          data: file.data.split(",")[1] || file.data, // Strip data URL prefix if exists
         },
       });
-
-      res.json({ text: response.text });
-    } catch (apiError: any) {
-      console.warn("⚠️ Gemini API calling failed, falling back to smart responder:", apiError);
-      const fallbackText = getSmartFallbackResponse(message, false);
-      res.json({ text: fallbackText });
     }
+
+    parts.push({ text: message });
+    contents.push({ role: "user", parts });
+
+    const systemInstruction = 
+      "Siz EduVerse AI platformasining 'Ustoz AI' chat yordamchisiz. Vazifangiz o'quvchilarga xohlagan fanlari (matematika, fizika, kimyo, tarix, ingliz tili, CEFR, SAT, IELTS va h.k.) bo'yicha juda tushunarli, aniq va qiziqarli dars o'tish, savollariga javob berishdir. Har doim o'zbek tilida, juda samimiy va rag'batlantiruvchi ohangda javob bering. O'quvchiga yo'l ko'rsating va zarur hollarda misollar keltiring. Agar o'quvchi rasm yoki fayl yuborgan bo'lsa, uni ham tahlil qilib darsga qo'shib tushuntiring.";
+
+    const response = await ai.models.generateContent({
+      model: "gemini-3.5-flash",
+      contents: contents,
+      config: {
+        systemInstruction: systemInstruction,
+        temperature: 0.8,
+      },
+    });
+
+    res.json({ text: response.text });
+  } catch (apiError: any) {
+    console.warn("⚠️ Gemini API calling failed, falling back to smart responder:", apiError);
+    const fallbackText = getSmartFallbackResponse(message, false) + 
+      `\n\n*(Eslatma: Haqiqiy Gemini AI so'rovi amalga oshmadi: "${apiError.message || apiError}". Iltimos, 'Settings > Secrets' bo'limida to'g'ri GEMINI_API_KEY o'rnatilganini tekshiring.)*`;
+    res.json({ text: fallbackText });
+  }
   } catch (error: any) {
     console.error("Gemini Chat Error:", error);
     res.status(500).json({ error: error.message || "Xatolik yuz berdi" });

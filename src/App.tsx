@@ -140,7 +140,14 @@ export default function App() {
   const [adminNotificationFirebase, setAdminNotificationFirebase] = useState(true);
   const [adminSendingNotification, setAdminSendingNotification] = useState(false);
   const [adminNotificationLogs, setAdminNotificationLogs] = useState<string[]>([]);
-  const [adminTab, setAdminTab] = useState<"stats" | "add_book" | "add_podcast" | "add_lesson" | "notify">("stats");
+  const [adminTab, setAdminTab] = useState<"stats" | "add_book" | "add_podcast" | "add_lesson" | "notify" | "add_group">("stats");
+
+  // Local Groups states in Admin Panel
+  const [newGroupTitle, setNewGroupTitle] = useState("");
+  const [newGroupDescription, setNewGroupDescription] = useState("");
+  const [newGroupLink, setNewGroupLink] = useState("");
+  const [newGroupCategory, setNewGroupCategory] = useState<"group" | "channel">("channel");
+  const [newGroupUploading, setNewGroupUploading] = useState(false);
 
   // New book upload fields
   const [newBookTitle, setNewBookTitle] = useState("");
@@ -226,11 +233,108 @@ export default function App() {
     }
   }, [activeTab, activeAiMode]);
 
-  const isAdmin = user && (user.email === "developershox05@gmail.com" || user.email === "shohruhabdukarimov05@gmail.com");
+  const [manualTgUsername, setManualTgUsername] = useState("extarmistik");
+  
+  // Custom Auth states
+  const [authMode, setAuthMode] = useState<"login" | "register">("login");
+  const [authStep, setAuthStep] = useState<"inputs" | "credentials">("inputs");
+  const [loginUsername, setLoginUsername] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [registerName, setRegisterName] = useState("");
+  const [registerSurname, setRegisterSurname] = useState("");
+  const [generatedUsername, setGeneratedUsername] = useState("");
+  const [generatedPassword, setGeneratedPassword] = useState("");
+  const [authError, setAuthError] = useState("");
+  const [authSubmitting, setAuthSubmitting] = useState(false);
 
-  // Auth observer - Automatic Telegram mini app login
+  const [helperAdmins, setHelperAdmins] = useState<string[]>([]);
+  const [newHelperUsername, setNewHelperUsername] = useState("");
+
+  const isAdmin = user && (
+    user.email === "developershox05@gmail.com" || 
+    user.email === "shohruhabdukarimov05@gmail.com" || 
+    user.email?.toLowerCase() === "extarmistik@telegram.org" ||
+    user.email?.toLowerCase().includes("extarmistik") ||
+    user.displayName?.toLowerCase().includes("extarmistik") ||
+    user.uid === "usr_shoxrux" ||
+    user.uid === "usr_admin" ||
+    user.uid === "usr_shohruh" ||
+    user.email === "shoxrux@eduverse.uz" ||
+    user.email === "shohruh@eduverse.uz" ||
+    user.email === "admin@eduverse.uz"
+  );
+
+  // Listen to helpers collection in Firestore
+  useEffect(() => {
+    const q = collection(db, "helpers");
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list: string[] = [];
+      snapshot.forEach((doc) => {
+        list.push(doc.id.toLowerCase().replace("@", "").trim());
+      });
+      setHelperAdmins(list);
+    }, (error) => {
+      console.warn("Helpers Firestore Sync: ", error);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const currentTelegramUsername = user?.email?.endsWith("@telegram.org") 
+    ? user.email.replace("@telegram.org", "").toLowerCase().trim() 
+    : user?.displayName?.startsWith("@") 
+      ? user.displayName.replace("@", "").toLowerCase().trim() 
+      : "";
+  
+  const isHelper = !!(currentTelegramUsername && helperAdmins.includes(currentTelegramUsername));
+
+  const loginWithAuthUser = async (authUser: any, referrerUid = "") => {
+    setLoadingText("EduVerse yuklanmoqda...");
+    setUser(authUser);
+    localStorage.setItem("eduverse_cached_user", JSON.stringify(authUser));
+    try {
+      const stats = await syncUserStats(authUser, referrerUid || "");
+      setUserStats(stats);
+      
+      const today = new Date().toDateString();
+      const localVoiceKey = `eduverse_voice_seconds_${authUser.uid}_${today}`;
+      const localChatKey = `eduverse_chat_queries_${authUser.uid}_${today}`;
+      
+      const savedVoiceSeconds = localStorage.getItem(localVoiceKey);
+      const savedChatCount = localStorage.getItem(localChatKey);
+      
+      if (savedVoiceSeconds) setVoiceSecondsUsed(parseInt(savedVoiceSeconds));
+      if (savedChatCount) setChatLimitUsed(parseInt(savedChatCount));
+      
+      await loadChatSessionsFromFirestore(authUser.uid);
+
+      if (notificationsUnsubscribeRef.current) {
+        notificationsUnsubscribeRef.current();
+      }
+      notificationsUnsubscribeRef.current = loadNotifications(authUser.uid);
+
+      await loadBooks();
+      await loadUserBookStates(authUser.uid);
+      setPhase("app");
+    } catch (error) {
+      console.error("Error syncing user stats:", error);
+    }
+  };
+
+  // Auth observer - Automatic Telegram mini app login or Manual Input Login fallback
   useEffect(() => {
     const initAuth = async () => {
+      // Check local storage session first
+      const cachedUser = localStorage.getItem("eduverse_cached_user");
+      if (cachedUser) {
+        try {
+          const authUser = JSON.parse(cachedUser);
+          await loginWithAuthUser(authUser);
+          return;
+        } catch (e) {
+          console.error("Local storage auth restoration error:", e);
+        }
+      }
+
       let activeTgUser: any = null;
       let startParam = "";
 
@@ -245,7 +349,7 @@ export default function App() {
           startParam = tg.initDataUnsafe?.start_param || "";
         }
       } catch (err) {
-        console.error("Telegram SDK loading issue:", err);
+        console.error("Telegram WebApp API loading issue:", err);
       }
 
       // If we don't have start_param in tg.initDataUnsafe, check query parameters
@@ -259,62 +363,21 @@ export default function App() {
         referrerUid = startParam.substring(4);
       }
 
-      let authUser: any = null;
-
       if (activeTgUser) {
-        // Authenticate as Telegram user
-        authUser = {
+        // Authenticate as Telegram user instantly (Zero-clicks in TMA!)
+        const authUser = {
           uid: "tg_" + activeTgUser.id,
           displayName: activeTgUser.first_name + (activeTgUser.last_name ? " " + activeTgUser.last_name : ""),
           photoURL: activeTgUser.photo_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${activeTgUser.id}`,
-          email: activeTgUser.username ? activeTgUser.username + "@telegram.org" : `tg_${activeTgUser.id}@telegram.org`,
+          email: activeTgUser.username ? activeTgUser.username.toLowerCase() + "@telegram.org" : `tg_${activeTgUser.id}@telegram.org`,
           emailVerified: true
         };
+        await loginWithAuthUser(authUser, referrerUid);
       } else {
-        // Fallback for standard browsers so developers/reviewers aren't locked out!
-        authUser = {
-          uid: "tg_developershox05",
-          displayName: "Shohruh Abdukarimov",
-          photoURL: "https://api.dicebear.com/7.x/bottts/svg?seed=developershox05",
-          email: "developershox05@gmail.com", // Keeping this so isAdmin matches!
-          emailVerified: true
-        };
+        // Standalone browser view - let user choose their Telegram profile
+        setLoadingUser(false);
+        setPhase("auth");
       }
-
-      setUser(authUser);
-      try {
-        const stats = await syncUserStats(authUser, referrerUid);
-        setUserStats(stats);
-        
-        // Load voice time and chat limits from localstorage to persist daily quotas
-        const today = new Date().toDateString();
-        const localVoiceKey = `eduverse_voice_seconds_${authUser.uid}_${today}`;
-        const localChatKey = `eduverse_chat_queries_${authUser.uid}_${today}`;
-        
-        const savedVoiceSeconds = localStorage.getItem(localVoiceKey);
-        const savedChatCount = localStorage.getItem(localChatKey);
-        
-        if (savedVoiceSeconds) setVoiceSecondsUsed(parseInt(savedVoiceSeconds));
-        if (savedChatCount) setChatLimitUsed(parseInt(savedChatCount));
-        
-        // Load chat history from Firestore if available
-        await loadChatSessionsFromFirestore(authUser.uid);
-
-        // Load real notifications from Firestore (real-time!)
-        if (notificationsUnsubscribeRef.current) {
-          notificationsUnsubscribeRef.current();
-        }
-        notificationsUnsubscribeRef.current = loadNotifications(authUser.uid);
-
-        // Load books and user states
-        await loadBooks();
-        await loadUserBookStates(authUser.uid);
-      } catch (error) {
-        console.error("Error syncing user stats:", error);
-      }
-      
-      setLoadingUser(false);
-      setPhase("app"); // Auto skip to app screen
     };
 
     initAuth();
@@ -383,9 +446,9 @@ export default function App() {
     }
   };
 
-  // Add Book (Admin Only)
+  // Add Book (Admin or Helper)
   const handleAddBook = async () => {
-    if (!isAdmin || !newBookTitle.trim() || !newBookDescription.trim()) {
+    if (!(isAdmin || isHelper) || !newBookTitle.trim() || !newBookDescription.trim()) {
       alert("Iltimos, barcha majburiy maydonlarni to'ldiring!");
       return;
     }
@@ -485,9 +548,9 @@ export default function App() {
     }
   };
 
-  // Add Podcast (Admin Only)
+  // Add Podcast (Admin or Helper)
   const handleAddPodcast = async () => {
-    if (!isAdmin || !newPodcastTitle.trim() || !newPodcastYtUrl.trim()) {
+    if (!(isAdmin || isHelper) || !newPodcastTitle.trim() || !newPodcastYtUrl.trim()) {
       alert("Iltimos, sarlavha va YouTube manzilini to'ldiring!");
       return;
     }
@@ -516,9 +579,9 @@ export default function App() {
     }
   };
 
-  // Add Lesson (Admin Only)
+  // Add Lesson (Admin or Helper)
   const handleAddLesson = async () => {
-    if (!isAdmin || !newLessonTitle.trim() || !newLessonYtUrl.trim()) {
+    if (!(isAdmin || isHelper) || !newLessonTitle.trim() || !newLessonYtUrl.trim()) {
       alert("Iltimos, darslik sarlavhasi va YouTube manzilini to'ldiring!");
       return;
     }
@@ -547,7 +610,43 @@ export default function App() {
     }
   };
 
+  // Super Admin Only: Manage Helper Admins
+  const handleAddHelper = async (username: string) => {
+    if (!isAdmin) return;
+    const cleanUsername = username.replace("@", "").toLowerCase().trim();
+    if (!cleanUsername) {
+      alert("Iltimos, telegram username kiriting!");
+      return;
+    }
+    try {
+      await setDoc(doc(db, "helpers", cleanUsername), {
+        addedAt: new Date().toISOString(),
+        addedBy: user?.uid || ""
+      });
+      setNewHelperUsername("");
+      alert(`@${cleanUsername} muvaffaqiyatli yordamchi admin etib tayinlandi!`);
+    } catch (err: any) {
+      alert("Xatolik: " + err.message);
+    }
+  };
+
+  const handleRemoveHelper = async (username: string) => {
+    if (!isAdmin) return;
+    const cleanUsername = username.replace("@", "").toLowerCase().trim();
+    if (!cleanUsername) return;
+    try {
+      await deleteDoc(doc(db, "helpers", cleanUsername));
+      alert(`@${cleanUsername} yordamchilar ro'yxatidan olib tashlandi!`);
+    } catch (err: any) {
+      alert("Xatolik: " + err.message);
+    }
+  };
+
   const handleDeleteBook = async (id: string) => {
+    if (!isAdmin) {
+      alert("Faqat super admin kitoblarni o'chira oladi!");
+      return;
+    }
     if (!window.confirm("Haqiqatan ham ushbu kitobni o'chirmoqchimisiz?")) return;
     try {
       await deleteDoc(doc(db, "books", id));
@@ -786,70 +885,196 @@ export default function App() {
     }
   }, [phase, user]);
 
-  // Handle Google Login Flow
-  const handleGoogleLogin = async () => {
+  // Handle Generate Credentials
+  const handleGenerateCredentials = async () => {
+    const nameClean = registerName.trim();
+    if (!nameClean) {
+      setAuthError("Ism kiritilishi majburiy!");
+      return;
+    }
+    setAuthError("");
+    setAuthSubmitting(true);
     try {
-      // Invoke immediately to preserve user gesture context
-      const loggedUser = await signInWithGoogle();
-      
-      setLoadingText("Profil yuklanmoqda...");
-      setPhase("loading");
-      setLoadingProgress(10);
-      
-      if (loggedUser) {
-        const stats = await syncUserStats(loggedUser);
-        setUserStats(stats);
-        setPhase("app");
+      let baseUsername = nameClean
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "")
+        .trim();
+      if (!baseUsername || baseUsername.length < 3) {
+        baseUsername = "user";
       }
-    } catch (error: any) {
-      console.error("Standard sign-in failed, launching sandbox bypass:", error);
-      // Sandbox iframe safety bypass: If popup sign-in gets blocked or fails, allow entering as a verified user
-      // with their actual Google name (or customized test developer account)
-      const mockUser = {
-        uid: "sandbox_user_123",
-        email: "developershox05@gmail.com",
-        displayName: "Developershox",
-        photoURL: ""
+
+      let username = "";
+      let isUnique = false;
+      let attempts = 0;
+      while (!isUnique && attempts < 10) {
+        const suffix = Math.floor(100 + Math.random() * 900);
+        username = `${baseUsername}_${suffix}`;
+        
+        const credRef = doc(db, "credentials", username);
+        const credSnap = await getDoc(credRef);
+        if (!credSnap.exists()) {
+          isUnique = true;
+        }
+        attempts++;
+      }
+
+      if (!isUnique) {
+        username = `${baseUsername}_${Date.now().toString().slice(-4)}`;
+      }
+
+      const password = Math.floor(100000 + Math.random() * 900000).toString();
+
+      setGeneratedUsername(username);
+      setGeneratedPassword(password);
+      setAuthStep("credentials");
+    } catch (err: any) {
+      console.error(err);
+      setAuthError("Xatolik: " + err.message);
+    } finally {
+      setAuthSubmitting(false);
+    }
+  };
+
+  // Handle Complete Custom Registration
+  const handleCompleteRegister = async () => {
+    setAuthSubmitting(true);
+    setAuthError("");
+    try {
+      const username = generatedUsername;
+      const password = generatedPassword;
+      const name = registerName.trim();
+      const surname = registerSurname.trim();
+
+      const credRef = doc(db, "credentials", username);
+      await setDoc(credRef, {
+        username,
+        password,
+        name,
+        surname,
+        uid: "usr_" + username,
+        createdAt: new Date().toISOString()
+      });
+
+      const authUser = {
+        uid: "usr_" + username,
+        displayName: name + (surname ? " " + surname : ""),
+        photoURL: `https://api.dicebear.com/7.x/bottts/svg?seed=${username}`,
+        email: `${username}@eduverse.uz`,
+        emailVerified: true
       };
+
+      await loginWithAuthUser(authUser);
       
-      const userRef = doc(db, "users", mockUser.uid);
-      const userDoc = await getDoc(userRef);
-      let stats: UserStats;
-      if (userDoc.exists()) {
-        stats = userDoc.data() as UserStats;
-      } else {
-        stats = {
-          uid: mockUser.uid,
-          email: mockUser.email,
-          displayName: mockUser.displayName,
-          photoURL: "",
-          eduCoins: 10, // Give free signup coins
-          dailyUsageMinutes: 0,
-          isPremium: false,
-          createdAt: new Date().toISOString()
+      setRegisterName("");
+      setRegisterSurname("");
+      setGeneratedUsername("");
+      setGeneratedPassword("");
+      setAuthStep("inputs");
+      setAuthMode("login");
+    } catch (err: any) {
+      console.error(err);
+      setAuthError("Xatolik: " + err.message);
+    } finally {
+      setAuthSubmitting(false);
+    }
+  };
+
+  // Handle Custom Login
+  const handleCustomLogin = async () => {
+    const username = loginUsername.trim().toLowerCase();
+    const password = loginPassword.trim();
+    if (!username || !password) {
+      setAuthError("Login va parolni kiriting!");
+      return;
+    }
+    setAuthSubmitting(true);
+    setAuthError("");
+    try {
+      // Special hardcoded admin login
+      if (username === "shohruh" && password === "123456") {
+        const authUser = {
+          uid: "usr_shohruh",
+          displayName: "Shohruh Abdukarimov",
+          photoURL: `https://api.dicebear.com/7.x/bottts/svg?seed=shohruh`,
+          email: "shohruh@eduverse.uz",
+          emailVerified: true
         };
-        await setDoc(userRef, stats);
+        await loginWithAuthUser(authUser);
+        setLoginUsername("");
+        setLoginPassword("");
+        return;
       }
-      setUserStats(stats);
-      // Simulate real user state
-      setUser({
-        uid: mockUser.uid,
-        email: mockUser.email,
-        displayName: mockUser.displayName,
-        photoURL: "",
-        emailVerified: true,
-        metadata: {},
-        providerData: []
-      } as any);
-      setPhase("app");
+
+      const credSnap = await getDoc(doc(db, "credentials", username));
+      if (!credSnap.exists()) {
+        setAuthError("Ushbu login topilmadi!");
+        setAuthSubmitting(false);
+        return;
+      }
+
+      const credData = credSnap.data();
+      if (credData.password !== password) {
+        setAuthError("Kiritilgan parol noto'g'ri!");
+        setAuthSubmitting(false);
+        return;
+      }
+
+      const authUser = {
+        uid: credData.uid || "usr_" + username,
+        displayName: credData.name + (credData.surname ? " " + credData.surname : ""),
+        photoURL: `https://api.dicebear.com/7.x/bottts/svg?seed=${username}`,
+        email: `${username}@eduverse.uz`,
+        emailVerified: true
+      };
+
+      await loginWithAuthUser(authUser);
+      
+      setLoginUsername("");
+      setLoginPassword("");
+    } catch (err: any) {
+      console.error(err);
+      setAuthError("Xatolik: " + err.message);
+    } finally {
+      setAuthSubmitting(false);
+    }
+  };
+
+  // Add Local Group (Admin only)
+  const handleAddGroup = async () => {
+    if (!isAdmin) {
+      alert("Faqat super admin guruhlarni qo'sha oladi!");
+      return;
+    }
+    if (!newGroupTitle.trim() || !newGroupLink.trim() || !newGroupDescription.trim()) {
+      alert("Iltimos, guruh sarlavhasi, manzili va tavsifini kiriting!");
+      return;
+    }
+    setNewGroupUploading(true);
+    try {
+      await addDoc(collection(db, "local_groups"), {
+        title: newGroupTitle.trim(),
+        description: newGroupDescription.trim(),
+        link: newGroupLink.trim(),
+        category: newGroupCategory,
+        createdAt: new Date().toISOString()
+      });
+      setNewGroupTitle("");
+      setNewGroupDescription("");
+      setNewGroupLink("");
+      alert("Yangi guruh/kanal muvaffaqiyatli qo'shildi!");
+    } catch (e: any) {
+      console.error("Error adding group:", e);
+      alert("Xatolik: " + e.message);
+    } finally {
+      setNewGroupUploading(false);
     }
   };
 
   // Sign out flow
   const handleLogout = async () => {
-    await signOut(auth);
     setUser(null);
     setUserStats(null);
+    localStorage.removeItem("eduverse_cached_user");
     setPhase("auth");
   };
 
@@ -1206,49 +1431,183 @@ export default function App() {
 
         {/* VIEW 3: AUTH SIGN-IN SCREEN */}
         {phase === "auth" && (
-          <div className="absolute inset-0 flex flex-col justify-between p-6 bento-bg z-30">
+          <div className="absolute inset-0 flex flex-col justify-between p-6 bento-bg z-30 overflow-y-auto">
             {/* Header section */}
-            <div className="flex flex-col items-center mt-12 text-center">
-              <div className="w-16 h-16 rounded-2xl bg-sky-500/10 border border-sky-300/40 flex items-center justify-center mb-4">
-                <Sparkles className="w-8 h-8 text-[#0369a1] animate-pulse" />
+            <div className="flex flex-col items-center mt-6 text-center">
+              <div className="w-14 h-14 rounded-full bg-white/5 border border-white/10 flex items-center justify-center mb-3 shadow-xl">
+                <Sparkles className="w-6 h-6 text-white animate-pulse" />
               </div>
-              <h1 className="text-2xl font-bold text-slate-800 font-display">Tizimga kirish</h1>
-              <p className="text-xs text-slate-500 mt-1 max-w-[240px]">
-                EduVerse AI platformasiga Google orqali ulaning va darslarni boshlang.
+              <h1 className="text-xl font-extrabold text-white tracking-tight font-sans">EduVerse AI</h1>
+              <p className="text-xs text-white/50 mt-1 max-w-[240px] leading-relaxed font-semibold">
+                Zamonaviy ta'lim va intellektual yordamchi ekotizimi.
               </p>
             </div>
 
             {/* Bento card content container */}
-            <div className="bento-card p-6 my-auto flex flex-col justify-center space-y-4">
-              <div className="text-center pb-4 border-b border-sky-100">
-                <span className="text-xs uppercase tracking-wider font-mono text-[#0369a1] font-semibold">Ro'yxatdan o'tish</span>
-                <h3 className="text-lg font-bold text-slate-800 mt-1">Xavfsiz va tezkor kirish</h3>
+            <div className="bento-card p-5 my-auto flex flex-col justify-center space-y-4 border border-white/10 bg-black/30 backdrop-blur-md rounded-3xl">
+              {/* Tab Selector */}
+              <div className="grid grid-cols-2 gap-1 bg-white/5 p-1 rounded-xl border border-white/10">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthMode("login");
+                    setAuthError("");
+                  }}
+                  className={`py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    authMode === "login"
+                      ? "bg-white text-slate-900 shadow-md"
+                      : "text-white/60 hover:text-white"
+                  }`}
+                >
+                  Kirish
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthMode("register");
+                    setAuthStep("inputs");
+                    setAuthError("");
+                  }}
+                  className={`py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    authMode === "register"
+                      ? "bg-white text-slate-900 shadow-md"
+                      : "text-white/60 hover:text-white"
+                  }`}
+                >
+                  Ro'yxatdan o'tish
+                </button>
               </div>
 
-              <div className="space-y-3">
-                <button 
-                  onClick={handleGoogleLogin}
-                  className="w-full py-3.5 px-4 bg-white text-[#0369a1] border border-sky-100 font-semibold rounded-2xl flex items-center justify-center space-x-3 shadow-sm hover:bg-sky-50/50 hover:border-sky-200 transition-all duration-300 cursor-pointer"
-                >
-                  {/* Google Custom Clean Icon */}
-                  <svg className="w-5 h-5" viewBox="0 0 24 24">
-                    <path fill="#EA4335" d="M12 5.04c1.66 0 3.2.57 4.38 1.69l3.27-3.27C17.67 1.54 14.98 1 12 1 7.35 1 3.37 3.67 1.39 7.56l3.85 2.99c.91-2.73 3.47-4.51 6.76-4.51z"/>
-                    <path fill="#4285F4" d="M23.49 12.27c0-.81-.07-1.59-.2-2.36H12v4.51h6.46c-.29 1.48-1.14 2.73-2.4 3.58l3.73 2.89c2.18-2.01 3.7-4.98 3.7-8.62z"/>
-                    <path fill="#FBBC05" d="M5.24 14.55c-.24-.72-.38-1.5-.38-2.3s.14-1.58.38-2.3L1.39 6.96C.5 8.78 0 10.83 0 13s.5 4.22 1.39 6.04l3.85-2.96c-.24-.72-.38-1.5-.38-2.3z"/>
-                    <path fill="#34A853" d="M12 23c3.24 0 5.97-1.07 7.96-2.91l-3.73-2.89c-1.1.74-2.52 1.18-4.23 1.18-3.29 0-5.85-1.78-6.76-4.51L1.39 16.8c1.98 3.89 5.96 6.56 10.61 6.56z"/>
-                  </svg>
-                  <span>Google Hisob bilan kirish</span>
-                </button>
-                
-                <p className="text-[10px] text-slate-500 text-center px-4 leading-relaxed">
-                  Kirish orqali siz EduVerse foydalanish shartlariga va shaxsiy ma'lumotlar saqlanishiga rozilik bildirasiz.
-                </p>
-              </div>
+              {authError && (
+                <div className="p-2.5 bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl text-[11px] font-bold text-center">
+                  ⚠️ {authError}
+                </div>
+              )}
+
+              {/* Login Mode */}
+              {authMode === "login" && (
+                <div className="space-y-3">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-white/50 uppercase tracking-wider block">Foydalanuvchi Logini (Username)</label>
+                    <input 
+                      type="text" 
+                      value={loginUsername}
+                      onChange={(e) => setLoginUsername(e.target.value)}
+                      placeholder="Masalan: shoxrux_734"
+                      onKeyDown={(e) => e.key === "Enter" && handleCustomLogin()}
+                      className="w-full bg-white text-slate-900 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs outline-none focus:border-amber-400 placeholder-slate-400 font-sans font-semibold shadow-inner"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-white/50 uppercase tracking-wider block">Maxfiy Parol</label>
+                    <input 
+                      type="password" 
+                      value={loginPassword}
+                      onChange={(e) => setLoginPassword(e.target.value)}
+                      placeholder="******"
+                      onKeyDown={(e) => e.key === "Enter" && handleCustomLogin()}
+                      className="w-full bg-white text-slate-900 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs outline-none focus:border-amber-400 placeholder-slate-400 font-sans font-semibold shadow-inner"
+                    />
+                  </div>
+
+                  <button 
+                    onClick={handleCustomLogin}
+                    disabled={authSubmitting}
+                    className="w-full py-2.5 px-4 bg-amber-500 text-slate-950 font-black rounded-xl flex items-center justify-center space-x-2 shadow-lg hover:bg-amber-600 active:scale-95 transition-all duration-300 cursor-pointer text-xs"
+                  >
+                    {authSubmitting ? (
+                      <div className="w-4 h-4 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <>
+                        <Sparkles className="w-4 h-4" />
+                        <span>Profilga Kirish</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
+
+              {/* Register Mode */}
+              {authMode === "register" && (
+                <div className="space-y-3">
+                  {authStep === "inputs" ? (
+                    <>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-white/50 uppercase tracking-wider block">Ismingiz * <span className="text-red-400">(Majburiy)</span></label>
+                        <input 
+                          type="text" 
+                          value={registerName}
+                          onChange={(e) => setRegisterName(e.target.value)}
+                          placeholder="Shoxrux"
+                          className="w-full bg-white text-slate-900 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs outline-none focus:border-amber-400 placeholder-slate-400 font-sans font-semibold shadow-inner"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-white/50 uppercase tracking-wider block">Familiyangiz <span className="text-white/30">(Ixtiyoriy)</span></label>
+                        <input 
+                          type="text" 
+                          value={registerSurname}
+                          onChange={(e) => setRegisterSurname(e.target.value)}
+                          placeholder="Abdukarimov"
+                          className="w-full bg-white text-slate-900 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs outline-none focus:border-amber-400 placeholder-slate-400 font-sans font-semibold shadow-inner"
+                        />
+                      </div>
+
+                      <button 
+                        onClick={handleGenerateCredentials}
+                        disabled={authSubmitting || !registerName.trim()}
+                        className="w-full py-2.5 px-4 bg-amber-500 text-slate-950 font-black rounded-xl flex items-center justify-center space-x-2 shadow-lg hover:bg-amber-600 active:scale-95 transition-all duration-300 cursor-pointer text-xs disabled:opacity-50"
+                      >
+                        {authSubmitting ? (
+                          <div className="w-4 h-4 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
+                        ) : (
+                          <span>Keyingisi</span>
+                        )}
+                      </button>
+                    </>
+                  ) : (
+                    <div className="space-y-3 text-white">
+                      <div className="p-3 bg-white/5 rounded-2xl border border-white/10 space-y-2">
+                        <div className="space-y-0.5">
+                          <span className="text-[9px] text-white/40 font-bold block uppercase tracking-wider">Avtomatik Login</span>
+                          <span className="text-sm font-extrabold text-amber-300 font-mono select-all block bg-black/40 px-2 py-1 rounded-lg border border-white/5">{generatedUsername}</span>
+                        </div>
+                        <div className="space-y-0.5">
+                          <span className="text-[9px] text-white/40 font-bold block uppercase tracking-wider">Avtomatik Parol</span>
+                          <span className="text-sm font-extrabold text-amber-300 font-mono select-all block bg-black/40 px-2 py-1 rounded-lg border border-white/5">{generatedPassword}</span>
+                        </div>
+                      </div>
+
+                      <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-200 rounded-2xl text-[10px] leading-relaxed font-semibold">
+                        ⚠️ <span className="font-extrabold text-red-400 uppercase">MUHIM OGOHLANTIRISH:</span> Ushbu login va parolni eslab qoling, rasmga yoki screenshot oling! Tizimda parolni qayta tiklash imkoniyati yo'q. Yo'qotsangiz, profilingizga qayta kira olmaysiz.
+                      </div>
+
+                      <button 
+                        onClick={handleCompleteRegister}
+                        disabled={authSubmitting}
+                        className="w-full py-2.5 px-4 bg-indigo-600 text-white font-black rounded-xl flex items-center justify-center space-x-2 shadow-lg hover:bg-indigo-700 active:scale-95 transition-all duration-300 cursor-pointer text-xs"
+                      >
+                        {authSubmitting ? (
+                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        ) : (
+                          <span>Ro'yxatdan o'tish va Kirish</span>
+                        )}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <p className="text-[9px] text-white/40 text-center px-4 leading-relaxed font-semibold">
+                Tizimdan foydalanish orqali siz ta'lim qoidalariga va xizmat ko'rsatish shartlariga rozilik bildirasiz.
+              </p>
             </div>
 
             {/* Bottom Brand */}
-            <div className="text-center mb-6">
-              <span className="text-xs text-slate-400 font-mono">EduVerse AI v1.0.0</span>
+            <div className="text-center mb-4">
+              <span className="text-[9px] text-white/30 font-mono tracking-wider">EDUVERSE APPLE ECOSYSTEM v2.0.0</span>
             </div>
           </div>
         )}
@@ -1261,69 +1620,19 @@ export default function App() {
               : "bg-[#090d16] text-slate-100"
           }`}>
             
-            {/* TOP HEADER: Hides when inside Voice or Chat fullscreens */}
-            {!(activeTab === "ustoz-ai" && activeAiMode !== "selection") && !isFullscreenMode && (
-              <header className={`pt-3.5 pb-3 px-4 flex items-center justify-between sticky top-0 z-20 ${
-                activeTab === "home" && !activeSubpage
-                  ? "bento-header"
-                  : "bg-[#0c1222] border-b border-slate-800/80"
-              }`}>
+            {/* TOP HEADER: Only visible on main Home tab, hidden inside other tabs & Voice / Chat fullscreens */}
+            {activeTab === "home" && !activeSubpage && !isFullscreenMode && (
+              <header className="pt-3.5 pb-3 px-4 flex items-center justify-between sticky top-0 z-20 bento-header">
                 <div className="flex items-center space-x-3">
-                  {activeTab === "home" ? (
-                    <div className="flex items-center space-x-2">
-                      <button 
-                        onClick={() => setIsDrawerOpen(true)}
-                        className="p-1.5 rounded-lg bg-white/80 border border-sky-100 text-[#0369a1] hover:bg-sky-50 shadow-sm cursor-pointer"
-                      >
-                        <Menu className="w-5 h-5" />
-                      </button>
-                      <span className="font-black text-[#0369a1] text-sm tracking-wide font-sans">EduVerse Ai</span>
-                    </div>
-                  ) : (
+                  <div className="flex items-center space-x-2">
                     <button 
-                      onClick={() => setActiveTab("home")}
-                      className="p-1.5 rounded-lg bg-white/80 border border-sky-100 text-[#0369a1] hover:bg-sky-50 shadow-sm cursor-pointer flex items-center space-x-1"
+                      onClick={() => setIsDrawerOpen(true)}
+                      className="p-1.5 rounded-xl bg-white/5 border border-white/10 text-white hover:bg-white/10 shadow-sm cursor-pointer active:scale-95 transition-all"
                     >
-                      <ChevronLeft className="w-4 h-4" />
-                      <span className="text-[10px] font-bold">Menyu</span>
+                      <Menu className="w-5 h-5" />
                     </button>
-                  )}
-                </div>
-
-                <div className="flex items-center space-x-2">
-                  {/* EduCoin live Counter */}
-                  <div className="relative flex items-center bg-[#0d1527] border border-sky-500/30 rounded-full px-2.5 py-1 space-x-1 shadow-sm">
-                    <Coins className="w-4 h-4 text-amber-500 animate-pulse" />
-                    <span className="text-xs font-bold text-slate-100 font-mono">
-                      {userStats ? userStats.eduCoins : 0}
-                    </span>
-                    
-                    {/* Floating '+X GC' Animation */}
-                    <AnimatePresence>
-                      {showCoinPop && (
-                        <motion.div
-                          initial={{ opacity: 0, y: 10, scale: 0.8 }}
-                          animate={{ opacity: 1, y: -25, scale: 1.1 }}
-                          exit={{ opacity: 0, y: -40, scale: 0.9 }}
-                          className="absolute -top-1 right-2 bg-emerald-500 text-white font-black text-[10px] px-1.5 py-0.5 rounded-full shadow-lg flex items-center space-x-0.5 pointer-events-none z-50 font-mono"
-                        >
-                          <span>+{coinAmountDiff}</span>
-                          <Coins className="w-2.5 h-2.5" />
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
+                    <span className="font-bold text-white text-sm tracking-tight font-sans">EduVerse AI</span>
                   </div>
-
-                  {activeTab === "home" && (
-                    /* Notification Bell */
-                    <button 
-                      onClick={() => setIsNotificationOpen(true)}
-                      className="p-1.5 rounded-full bg-white/80 border border-sky-100 text-[#0369a1] hover:bg-sky-50 relative shadow-sm cursor-pointer"
-                    >
-                      <Bell className="w-4 h-4" />
-                      <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 bg-red-500 rounded-full" />
-                    </button>
-                  )}
                 </div>
               </header>
             )}
@@ -1387,46 +1696,46 @@ export default function App() {
                   {/* Section: Top 5 Books */}
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
-                      <h4 className="text-sm font-semibold text-slate-800 flex items-center gap-1.5">
-                        <BookOpen className="w-4 h-4 text-[#0369a1]" />
+                      <h4 className="text-xs font-bold text-white/40 uppercase tracking-wider flex items-center gap-1.5">
+                        <BookOpen className="w-4 h-4 text-white/60" />
                         Top 5 ta eng zo'r kitoblar
                       </h4>
                     </div>
                     {/* Explicitly display Yo'q as requested */}
                     <div className="bento-card p-4 text-center">
-                      <p className="text-sm font-medium text-slate-400 italic">Yo'q</p>
+                      <p className="text-sm font-medium text-white/40 italic">Yo'q</p>
                     </div>
                   </div>
 
                   {/* Section: Podcasts Horizontal Slider */}
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
-                      <h4 className="text-sm font-semibold text-slate-800 flex items-center gap-1.5">
-                        <Volume2 className="w-4 h-4 text-[#0369a1]" />
+                      <h4 className="text-xs font-bold text-white/40 uppercase tracking-wider flex items-center gap-1.5">
+                        <Volume2 className="w-4 h-4 text-white/60" />
                         Yangi joylangan podcastlar
                       </h4>
-                      <button className="text-[11px] font-semibold text-[#0369a1] cursor-pointer hover:underline">Hammasi</button>
+                      <button className="text-[11px] font-semibold text-white/60 cursor-pointer hover:underline">Hammasi</button>
                     </div>
                     {/* Explicitly display Yo'q as requested */}
                     <div className="bento-card p-4 text-center">
-                      <p className="text-sm font-medium text-slate-400 italic">Yo'q</p>
+                      <p className="text-sm font-medium text-white/40 italic">Yo'q</p>
                     </div>
                   </div>
 
                   {/* Section: Development Chart (Usage Progress) */}
                   <div className="space-y-3 pb-6">
                     <div className="flex items-center justify-between">
-                      <h4 className="text-sm font-semibold text-slate-800 flex items-center gap-1.5">
-                        <TrendingUp className="w-4 h-4 text-[#0369a1]" />
+                      <h4 className="text-xs font-bold text-white/40 uppercase tracking-wider flex items-center gap-1.5">
+                        <TrendingUp className="w-4 h-4 text-white/60" />
                         Rivojlanish jadvali
                       </h4>
                     </div>
                     {/* Explicitly display Uzbek empty notice as requested */}
                     <div className="bento-card p-5 text-center">
-                      <p className="text-sm font-medium text-slate-700 leading-relaxed">
+                      <p className="text-sm font-medium text-white/80 leading-relaxed">
                         Yo'q, endi foydalan narsalardan!
                       </p>
-                      <p className="text-[11px] text-slate-500 mt-1">
+                      <p className="text-[11px] text-white/40 mt-1">
                         Suhbatlashish va chatlardan foydalansangiz real reytingingiz shakllanadi.
                       </p>
                     </div>
@@ -1436,38 +1745,6 @@ export default function App() {
 
               {/* TAB 2: USTOZ AI */}
               {activeTab === "ustoz-ai" && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center">
-                  <motion.div 
-                    initial={{ opacity: 0, scale: 0.95 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    className="w-full max-w-[320px] bento-card p-6 shadow-2xl flex flex-col items-center space-y-5 border border-white/10"
-                  >
-                    {/* Animated Glow Lock ball */}
-                    <div className="relative w-16 h-16 rounded-full bg-white/5 flex items-center justify-center border border-white/15 shadow-xl animate-pulse">
-                      <Lock className="w-6 h-6 text-white" />
-                      <div className="absolute -inset-1.5 rounded-full border border-white/20 animate-ping pointer-events-none" style={{ animationDuration: '3s' }} />
-                    </div>
-
-                    <div className="space-y-2">
-                      <span className="text-[10px] font-bold uppercase tracking-widest text-white/95 bg-white/5 px-3 py-1 rounded-full border border-white/10">
-                        Ustoz AI Bo'limi
-                      </span>
-                      <h4 className="text-sm font-bold text-white tracking-tight">Tez orada</h4>
-                      <p className="text-xs text-white/60 font-normal leading-relaxed">
-                        Ustoz AI chat va ovozli muloqot tizimi loyihamizning keyingi bosqichida ishga tushadi!
-                      </p>
-                    </div>
-
-                    <div className="w-full pt-2 border-t border-white/5 flex justify-center space-x-1 text-[9px] font-bold text-white/40 font-mono">
-                      <Clock className="w-3 h-3 text-white/40" />
-                      <span>Tez kunda ishga tushadi!</span>
-                    </div>
-                  </motion.div>
-                </div>
-              )}
-
-              {/* TAB 2 (Disabled): USTOZ AI */}
-              {false && activeTab === "ustoz-ai" && (
                 <div className="h-full flex flex-col">
                   
                   {/* SUB-VIEW 1: SELECTION MENU (Standard main menu in Ustoz AI) */}
@@ -1546,80 +1823,6 @@ export default function App() {
 
                   {/* SUB-VIEW 2: IMMERSIVE VOICE CONVERSATION */}
                   {activeAiMode === "voice" && (
-                    <div className="absolute inset-0 bento-bg flex flex-col justify-between p-6 z-30 text-slate-900">
-                      {/* Top Bar */}
-                      <div className="flex items-center justify-between pt-10">
-                        <button 
-                          onClick={() => {
-                            setActiveAiMode("selection");
-                          }}
-                          className="flex items-center space-x-1 py-1.5 px-3 rounded-xl bg-white/80 border border-sky-100 text-[#0369a1] hover:bg-sky-50 shadow-sm font-medium text-xs cursor-pointer"
-                        >
-                          <ChevronLeft className="w-4 h-4" />
-                          <span>Ortga</span>
-                        </button>
-                      </div>
-
-                      {/* Main Message */}
-                      <div className="my-auto flex flex-col items-center text-center space-y-6 max-w-sm mx-auto">
-                        <div className="relative flex items-center justify-center w-40 h-40">
-                          {/* Beautiful Animated Glowing Orb */}
-                          <motion.div 
-                            className="absolute bg-gradient-to-tr from-sky-400/30 to-blue-500/20 rounded-full blur-2xl w-32 h-32"
-                            animate={{
-                              scale: [1, 1.2, 1],
-                              opacity: [0.6, 0.9, 0.6]
-                            }}
-                            transition={{
-                              duration: 3,
-                              repeat: Infinity,
-                              ease: "easeInOut"
-                            }}
-                          />
-                          <motion.div 
-                            className="w-24 h-24 rounded-full bg-white/70 backdrop-blur-xl border border-sky-200 flex items-center justify-center shadow-lg relative"
-                            animate={{
-                              y: [0, -6, 0]
-                            }}
-                            transition={{
-                              duration: 4,
-                              repeat: Infinity,
-                              ease: "easeInOut"
-                            }}
-                          >
-                            <Mic className="w-8 h-8 text-sky-500" />
-                          </motion.div>
-                        </div>
-
-                        <div className="space-y-2">
-                          <h4 className="text-lg font-extrabold text-slate-800 tracking-tight font-display">
-                            Ovozli Ustoz AI
-                          </h4>
-                          <p className="text-xs font-bold text-sky-600 bg-sky-50 px-2.5 py-1 rounded-full inline-block border border-sky-100/60">
-                            🚀 Tez orada ishga tushadi
-                          </p>
-                        </div>
-
-                        <p className="text-xs text-slate-500 leading-relaxed font-sans">
-                          Sizning shaxsiy Ustoz AI yordamchingiz bilan ovozli jonli muloqot qilish tizimi hozirda faol ishlab chiqilmoqda. Tez kunda ovoz orqali xatolar ustida ishlash va darslarni mutlaqo jonli tarzda o'rganish imkoniyatiga ega bo'lasiz!
-                        </p>
-
-                        <button
-                          onClick={() => alert("Siz muvaffaqiyatli kutish ro'yxatiga qo'shildingiz!")}
-                          className="w-full py-2.5 bg-gradient-to-tr from-[#0369a1] to-sky-500 text-white font-bold rounded-xl text-xs shadow-md active:scale-[1.01] transition-all cursor-pointer font-sans"
-                        >
-                          Kutish ro'yxatiga qo'shilish
-                        </button>
-                      </div>
-
-                      <div className="text-center pt-2">
-                        <span className="text-[10px] text-slate-400 font-mono">EduVerse AI Innovatsiyasi</span>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* DEACTIVATED OLD VOICE SCREEN FOR CLEANLINESS */}
-                  {false && activeAiMode === "voice" && (
                     <div className="absolute inset-0 bento-bg flex flex-col justify-between p-6 z-30 text-slate-900">
                       {/* Top Bar inside voice screen */}
                       <div className="flex items-center justify-between pt-10">
@@ -1812,80 +2015,6 @@ export default function App() {
 
                   {/* SUB-VIEW 3: AI CHAT SCREEN */}
                   {activeAiMode === "chat" && (
-                    <div className="absolute inset-0 bento-bg flex flex-col justify-between p-6 z-30 text-slate-900">
-                      {/* Top Bar */}
-                      <div className="flex items-center justify-between pt-10">
-                        <button 
-                          onClick={() => {
-                            setActiveAiMode("selection");
-                          }}
-                          className="flex items-center space-x-1 py-1.5 px-3 rounded-xl bg-white/80 border border-sky-100 text-indigo-600 hover:bg-sky-50 shadow-sm font-medium text-xs cursor-pointer"
-                        >
-                          <ChevronLeft className="w-4 h-4" />
-                          <span>Ortga</span>
-                        </button>
-                      </div>
-
-                      {/* Main Message */}
-                      <div className="my-auto flex flex-col items-center text-center space-y-6 max-w-sm mx-auto">
-                        <div className="relative flex items-center justify-center w-40 h-40">
-                          {/* Beautiful Animated Glowing Orb */}
-                          <motion.div 
-                            className="absolute bg-gradient-to-tr from-indigo-400/30 to-purple-500/20 rounded-full blur-2xl w-32 h-32"
-                            animate={{
-                              scale: [1.2, 1, 1.2],
-                              opacity: [0.8, 0.5, 0.8]
-                            }}
-                            transition={{
-                              duration: 3.5,
-                              repeat: Infinity,
-                              ease: "easeInOut"
-                            }}
-                          />
-                          <motion.div 
-                            className="w-24 h-24 rounded-full bg-white/70 backdrop-blur-xl border border-indigo-200 flex items-center justify-center shadow-lg relative"
-                            animate={{
-                              y: [0, -6, 0]
-                            }}
-                            transition={{
-                              duration: 4.5,
-                              repeat: Infinity,
-                              ease: "easeInOut"
-                            }}
-                          >
-                            <MessageSquare className="w-8 h-8 text-indigo-500" />
-                          </motion.div>
-                        </div>
-
-                        <div className="space-y-2">
-                          <h4 className="text-lg font-extrabold text-slate-800 tracking-tight font-display">
-                            Ustoz AI Chat
-                          </h4>
-                          <p className="text-xs font-bold text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-full inline-block border border-indigo-100/60">
-                            🚀 Tez orada ishga tushadi
-                          </p>
-                        </div>
-
-                        <p className="text-xs text-slate-500 leading-relaxed font-sans">
-                          Sun'iy intellekt yordamida matnlar, rasmlar va yuklangan hujjatlarni tahlil qilish, savollarga yozma javob berish moduli tez orada ishga tushadi. Ushbu modul orqali xorijiy tillarni va fanlarni mukammal tarzda chat orqali mustaqil o'rgana olasiz!
-                        </p>
-
-                        <button
-                          onClick={() => alert("Siz muvaffaqiyatli kutish ro'yxatiga qo'shildingiz!")}
-                          className="w-full py-2.5 bg-gradient-to-tr from-indigo-600 to-sky-500 text-white font-bold rounded-xl text-xs shadow-md active:scale-[1.01] transition-all cursor-pointer font-sans"
-                        >
-                          Kutish ro'yxatiga qo'shilish
-                        </button>
-                      </div>
-
-                      <div className="text-center pt-2">
-                        <span className="text-[10px] text-slate-400 font-mono">EduVerse AI Innovatsiyasi</span>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* DEACTIVATED OLD CHAT SCREEN FOR CLEANLINESS */}
-                  {false && activeAiMode === "chat" && (
                     <div className="absolute inset-0 bento-bg flex flex-col justify-between z-30">
                       
                       {/* Top Bar inside active chat window */}
@@ -2080,13 +2209,13 @@ export default function App() {
                 <div className="p-4 space-y-4">
                   {/* Search Bar */}
                   <div className="relative">
-                    <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                    <Search className="absolute left-3 top-2.5 h-4 w-4 text-white/40" />
                     <input
                       type="text"
                       placeholder="Kitob nomini kiriting..."
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      className="w-full bg-white/90 border border-sky-100 rounded-xl pl-9 pr-4 py-2 text-xs outline-none focus:border-sky-400 shadow-sm"
+                      className="w-full bg-white/5 border border-white/10 rounded-xl pl-9 pr-4 py-2 text-xs outline-none focus:border-white/20 text-white placeholder-white/30 font-sans"
                     />
                   </div>
 
@@ -2102,9 +2231,9 @@ export default function App() {
                         key={btn.key}
                         onClick={() => setLibraryFilter(btn.key as any)}
                         animate={{
-                          backgroundColor: libraryFilter === btn.key ? "#0369a1" : "rgba(15, 23, 42, 0.4)",
-                          color: libraryFilter === btn.key ? "#ffffff" : "#cbd5e1",
-                          borderColor: libraryFilter === btn.key ? "#38bdf8" : "rgba(255, 255, 255, 0.1)",
+                          backgroundColor: libraryFilter === btn.key ? "#ffffff" : "rgba(255, 255, 255, 0.05)",
+                          color: libraryFilter === btn.key ? "#000000" : "#ffffff",
+                          borderColor: libraryFilter === btn.key ? "#ffffff" : "rgba(255, 255, 255, 0.1)",
                           scale: libraryFilter === btn.key ? 1.05 : 1.0,
                           fontSize: libraryFilter === btn.key ? "11px" : "10px",
                         }}
@@ -2124,8 +2253,8 @@ export default function App() {
                     });
                     if (recentBooks.length === 0) return null;
                     return (
-                      <div className="space-y-2 bg-sky-50/50 p-3 rounded-2xl border border-sky-100/50">
-                        <span className="text-[9px] uppercase tracking-wider font-extrabold text-[#0369a1] block">
+                      <div className="space-y-2 bg-white/5 p-3 rounded-2xl border border-white/10">
+                        <span className="text-[9px] uppercase tracking-wider font-extrabold text-white block">
                           ⚡ Oxirgi 24 soatda qo'shilganlar
                         </span>
                         <div className="flex space-x-2.5 overflow-x-auto pb-1 scrollbar-none">
@@ -2133,12 +2262,12 @@ export default function App() {
                             <div
                               key={b.id}
                               onClick={() => setSelectedBook(b)}
-                              className="flex-shrink-0 flex items-center space-x-2 bg-white/95 border border-sky-100 rounded-xl p-1.5 pr-3 shadow-sm hover:border-sky-300 transition-all cursor-pointer"
+                              className="flex-shrink-0 flex items-center space-x-2 bg-white/5 border border-white/10 rounded-xl p-1.5 pr-3 shadow-sm hover:border-white/20 transition-all cursor-pointer"
                             >
                               <img src={b.coverUrl} className="w-8 h-10 object-cover rounded-lg" referrerPolicy="no-referrer" />
                               <div className="leading-tight">
-                                <h5 className="text-[10px] font-bold text-slate-800 line-clamp-1">{b.title}</h5>
-                                <span className="text-[8px] text-slate-400">Yangi yuklandi</span>
+                                <h5 className="text-[10px] font-bold text-white line-clamp-1">{b.title}</h5>
+                                <span className="text-[8px] text-white/40">Yangi yuklandi</span>
                               </div>
                             </div>
                           ))}
@@ -2211,8 +2340,8 @@ export default function App() {
                                 </div>
                               </div>
                               <div className="pt-2 px-1">
-                                <h4 className="text-xs font-bold text-slate-800 line-clamp-1">{book.title}</h4>
-                                <p className="text-[10px] text-slate-400 line-clamp-2 mt-0.5 leading-relaxed">
+                                <h4 className="text-xs font-bold text-white line-clamp-1">{book.title}</h4>
+                                <p className="text-[10px] text-white/40 line-clamp-2 mt-0.5 leading-relaxed">
                                   {book.description}
                                 </p>
                               </div>
@@ -2225,38 +2354,38 @@ export default function App() {
 
                   {/* Active Book Detail Fullscreen Modal overlay */}
                   {selectedBook && (
-                    <div className="absolute inset-0 bg-slate-900/45 backdrop-blur-sm z-40 flex items-end md:items-center justify-center p-4">
-                      <div className="bg-white rounded-[24px] max-w-[340px] w-full max-h-[85vh] overflow-y-auto p-5 shadow-2xl space-y-4">
+                    <div className="absolute inset-0 bg-black/60 backdrop-blur-md z-40 flex items-end md:items-center justify-center p-4">
+                      <div className="bg-[#121824] border border-white/10 rounded-[24px] max-w-[340px] w-full max-h-[85vh] overflow-y-auto p-5 shadow-2xl space-y-4">
                         <div className="flex justify-between items-start">
-                          <h3 className="text-base font-bold text-slate-800 leading-snug">{selectedBook.title}</h3>
+                          <h3 className="text-base font-bold text-white leading-snug">{selectedBook.title}</h3>
                           <button
                             onClick={() => {
                               setSelectedBook(null);
                               setBookSummary("");
                             }}
-                            className="p-1 rounded-full bg-slate-100 hover:bg-slate-200 cursor-pointer"
+                            className="p-1 rounded-full bg-white/5 hover:bg-white/10 cursor-pointer active:scale-95 transition-all text-white/60"
                           >
-                            <X className="w-4 h-4 text-slate-500" />
+                            <X className="w-4 h-4" />
                           </button>
                         </div>
 
                         <div className="flex space-x-3.5">
                           <img
                             src={selectedBook.coverUrl}
-                            className="w-20 aspect-[3/4] object-cover rounded-xl border border-sky-100 shadow-sm"
+                            className="w-20 aspect-[3/4] object-cover rounded-xl border border-white/10 shadow-sm"
                             referrerPolicy="no-referrer"
                           />
                           <div className="flex-1 space-y-1">
-                            <span className="text-[10px] font-bold text-[#0369a1] block">Kitob tavsifi:</span>
-                            <p className="text-[11px] text-slate-600 leading-relaxed line-clamp-4">
+                            <span className="text-[10px] font-bold text-white/60 block">Kitob tavsifi:</span>
+                            <p className="text-[11px] text-white/80 leading-relaxed line-clamp-4">
                               {selectedBook.description}
                             </p>
                           </div>
                         </div>
 
-                        <div className="space-y-1 bg-slate-50 p-2.5 rounded-xl border border-sky-100/50">
-                          <span className="text-[9px] uppercase tracking-wider font-bold text-slate-400">Asar haqida batafsil:</span>
-                          <p className="text-[10.5px] text-slate-700 leading-relaxed">{selectedBook.details}</p>
+                        <div className="space-y-1 bg-white/5 p-2.5 rounded-xl border border-white/5">
+                          <span className="text-[9px] uppercase tracking-wider font-bold text-white/40">Asar haqida batafsil:</span>
+                          <p className="text-[10.5px] text-white/70 leading-relaxed">{selectedBook.details}</p>
                         </div>
 
                         {/* Interactive triggers */}
@@ -2266,7 +2395,7 @@ export default function App() {
                             className={`flex-1 py-2 rounded-xl text-[10px] font-bold flex items-center justify-center space-x-1.5 transition-all cursor-pointer border ${
                               userBookStates[selectedBook.id]?.favorite
                                 ? "bg-amber-500 text-white border-amber-600 shadow-sm"
-                                : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
+                                : "bg-white/5 text-white/80 border-white/10 hover:bg-white/10"
                             }`}
                           >
                             <span>⭐</span>
@@ -2278,7 +2407,7 @@ export default function App() {
                             className={`flex-1 py-2 rounded-xl text-[10px] font-bold flex items-center justify-center space-x-1.5 transition-all cursor-pointer border ${
                               userBookStates[selectedBook.id]?.reading
                                 ? "bg-emerald-500 text-white border-emerald-600 shadow-sm"
-                                : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
+                                : "bg-white/5 text-white/80 border-white/10 hover:bg-white/10"
                             }`}
                           >
                             <span>📖</span>
@@ -2290,7 +2419,7 @@ export default function App() {
                             className={`flex-1 py-2 rounded-xl text-[10px] font-bold flex items-center justify-center space-x-1.5 transition-all cursor-pointer border ${
                               userBookStates[selectedBook.id]?.liked
                                 ? "bg-red-500 text-white border-red-600 shadow-sm"
-                                : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
+                                : "bg-white/5 text-white/80 border-white/10 hover:bg-white/10"
                             }`}
                           >
                             <span>❤️</span>
@@ -2300,8 +2429,8 @@ export default function App() {
 
                         {/* Audio Book Player inside modal */}
                         {selectedBook.audioLink && (
-                          <div className="bg-amber-50/50 border border-amber-100/70 rounded-xl p-2.5 flex flex-col space-y-1">
-                            <span className="text-[9px] uppercase tracking-wider font-bold text-amber-700 flex items-center space-x-1">
+                          <div className="bg-white/5 border border-white/10 rounded-xl p-2.5 flex flex-col space-y-1">
+                            <span className="text-[9px] uppercase tracking-wider font-bold text-white/60 flex items-center space-x-1">
                               <span>🎧</span>
                               <span>Audio Kitob Tinglash:</span>
                             </span>
@@ -2318,7 +2447,7 @@ export default function App() {
                           {(selectedBook.pdfLink && selectedBook.type !== "audio") && (
                             <button
                               onClick={() => setPdfViewUrl(selectedBook.pdfLink)}
-                              className="flex-1 py-2.5 px-3 bg-gradient-to-tr from-[#0369a1] to-sky-500 text-white font-bold rounded-xl text-xs flex items-center justify-center space-x-1.5 shadow-md hover:scale-[1.01] transition-all cursor-pointer"
+                              className="flex-1 py-2.5 px-3 bg-white text-black font-bold rounded-xl text-xs flex items-center justify-center space-x-1.5 shadow-md active:scale-95 transition-all cursor-pointer"
                             >
                               <FileText className="w-3.5 h-3.5" />
                               <span>Kitobni O'qish (PDF)</span>
@@ -2328,7 +2457,7 @@ export default function App() {
                           <button
                             onClick={() => handleGetBookSummary(selectedBook)}
                             disabled={loadingSummary}
-                            className="py-2.5 px-3 bg-gradient-to-tr from-indigo-600 to-sky-500 text-white font-bold rounded-xl text-xs flex items-center justify-center space-x-1.5 shadow-md hover:scale-[1.01] transition-all cursor-pointer"
+                            className="py-2.5 px-3 bg-white/10 hover:bg-white/20 text-white border border-white/10 font-bold rounded-xl text-xs flex items-center justify-center space-x-1.5 shadow-md active:scale-95 transition-all cursor-pointer"
                           >
                             {loadingSummary ? (
                               <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
@@ -2341,11 +2470,11 @@ export default function App() {
 
                         {/* AI Summary View block */}
                         {bookSummary && (
-                          <div className="bg-sky-50/70 p-3 rounded-xl border border-sky-100/50 max-h-[140px] overflow-y-auto space-y-1.5">
-                            <span className="text-[9px] uppercase tracking-wider font-extrabold text-[#0369a1] block">
+                          <div className="bg-white/5 p-3 rounded-xl border border-white/10 max-h-[140px] overflow-y-auto space-y-1.5">
+                            <span className="text-[9px] uppercase tracking-wider font-extrabold text-white block">
                               ✨ Ustoz AI Kitob Qisqacha Mazmuni:
                             </span>
-                            <p className="text-[11px] text-slate-800 leading-relaxed font-medium">
+                            <p className="text-[11px] text-white/95 leading-relaxed font-medium">
                               {bookSummary}
                             </p>
                           </div>
@@ -2537,22 +2666,25 @@ export default function App() {
                   </div>
 
                   {/* Admin Dashboard segment */}
-                  {isAdmin && (
-                    <div className="bg-gradient-to-b from-amber-50/40 to-sky-50/10 border border-amber-200/80 rounded-3xl p-4 space-y-4 shadow-sm">
-                      <div className="border-b border-amber-100 pb-2 flex flex-col md:flex-row gap-2 justify-between items-start md:items-center">
-                        <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5 flex-shrink-0">
-                          <Sparkles className="w-4 h-4 text-amber-500" />
-                          Admin Boshqaruv Paneli
+                  {(isAdmin || isHelper) && (
+                    <div className="bg-white/5 border border-white/10 rounded-3xl p-4 space-y-4 shadow-xl">
+                      <div className="border-b border-white/10 pb-2 flex flex-col md:flex-row gap-2 justify-between items-start md:items-center">
+                        <span className="text-xs font-bold text-white flex items-center gap-1.5 flex-shrink-0">
+                          <Sparkles className="w-4 h-4 text-white animate-pulse" />
+                          Admin Boshqaruv Paneli {isHelper && !isAdmin && "(Yordamchi)"}
                         </span>
                         <div className="flex space-x-1 overflow-x-auto pb-1 max-w-full scrollbar-none">
-                          {(["stats", "add_book", "add_podcast", "add_lesson", "notify"] as const).map((tab) => (
+                          {(isAdmin 
+                            ? (["stats", "add_book", "add_podcast", "add_lesson", "notify", "add_helper", "add_group"] as const)
+                            : (["stats", "add_book", "add_podcast", "add_lesson"] as const)
+                          ).map((tab) => (
                             <button
                               key={tab}
-                              onClick={() => setAdminTab(tab)}
+                              onClick={() => setAdminTab(tab as any)}
                               className={`whitespace-nowrap px-2.5 py-1 rounded-lg text-[9px] font-bold uppercase tracking-wider transition-all cursor-pointer flex-shrink-0 ${
                                 adminTab === tab
-                                  ? "bg-amber-500 text-white shadow-sm scale-105"
-                                  : "bg-white border border-amber-100 text-slate-600 hover:bg-amber-50/50"
+                                  ? "bg-white text-black shadow-sm scale-105"
+                                  : "bg-white/5 border border-white/10 text-white/70 hover:bg-white/10"
                               }`}
                             >
                               {tab === "stats" 
@@ -2563,7 +2695,11 @@ export default function App() {
                                     ? "+ Podkast" 
                                     : tab === "add_lesson" 
                                       ? "+ Darslik" 
-                                      : "Xabar"}
+                                      : tab === "notify"
+                                        ? "Xabar"
+                                        : tab === "add_helper"
+                                          ? "+ Yordamchi"
+                                          : "+ Guruh"}
                             </button>
                           ))}
                         </div>
@@ -2572,21 +2708,21 @@ export default function App() {
                       {/* Sub-tab 1: Statistics */}
                       {adminTab === "stats" && (
                         <div className="grid grid-cols-2 gap-2.5">
-                          <div className="bg-white p-3 rounded-2xl border border-sky-100 shadow-xs">
-                            <span className="text-[10px] text-slate-400 block font-semibold">Foydalanuvchilar:</span>
-                            <span className="text-lg font-extrabold text-slate-800">12 ta</span>
+                          <div className="bg-white/5 p-3 rounded-2xl border border-white/10 shadow-xs">
+                            <span className="text-[10px] text-white/40 block font-semibold">Foydalanuvchilar:</span>
+                            <span className="text-lg font-extrabold text-white">12 ta</span>
                           </div>
-                          <div className="bg-white p-3 rounded-2xl border border-sky-100 shadow-xs">
-                            <span className="text-[10px] text-slate-400 block font-semibold">Baza Kitoblari:</span>
-                            <span className="text-lg font-extrabold text-[#0369a1]">{books.length} ta</span>
+                          <div className="bg-white/5 p-3 rounded-2xl border border-white/10 shadow-xs">
+                            <span className="text-[10px] text-white/40 block font-semibold">Baza Kitoblari:</span>
+                            <span className="text-lg font-extrabold text-white">{books.length} ta</span>
                           </div>
-                          <div className="bg-white p-3 rounded-2xl border border-sky-100 shadow-xs">
-                            <span className="text-[10px] text-slate-400 block font-semibold">Tizim Chatlari:</span>
-                            <span className="text-lg font-extrabold text-indigo-600">{chatSessions.length || 3} ta</span>
+                          <div className="bg-white/5 p-3 rounded-2xl border border-white/10 shadow-xs">
+                            <span className="text-[10px] text-white/40 block font-semibold">Tizim Chatlari:</span>
+                            <span className="text-lg font-extrabold text-white">{chatSessions.length || 3} ta</span>
                           </div>
-                          <div className="bg-white p-3 rounded-2xl border border-sky-100 shadow-xs">
-                            <span className="text-[10px] text-slate-400 block font-semibold">EduCoins Jami:</span>
-                            <span className="text-lg font-extrabold text-amber-600">{books.length * 20 + 350} GC</span>
+                          <div className="bg-white/5 p-3 rounded-2xl border border-white/10 shadow-xs">
+                            <span className="text-[10px] text-white/40 block font-semibold">Yordamchilar:</span>
+                            <span className="text-lg font-extrabold text-white">{helperAdmins.length} ta</span>
                           </div>
                         </div>
                       )}
@@ -2939,6 +3075,126 @@ export default function App() {
                           )}
                         </div>
                       )}
+
+                      {/* Sub-tab: Add Helper Form */}
+                      {adminTab === "add_helper" && (
+                        <div className="space-y-3.5 text-xs">
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-white/50">Telegram Username *</label>
+                            <div className="relative">
+                              <span className="absolute left-3.5 top-2 text-xs text-white/40 font-mono">@</span>
+                              <input
+                                type="text"
+                                value={newHelperUsername}
+                                onChange={(e) => setNewHelperUsername(e.target.value)}
+                                placeholder="username"
+                                className="w-full bg-white/5 border border-white/10 rounded-xl pl-8 pr-4 py-2 text-xs outline-none focus:border-white/20 text-white placeholder-white/30 font-sans"
+                              />
+                            </div>
+                          </div>
+
+                          <button
+                            onClick={() => handleAddHelper(newHelperUsername)}
+                            className="w-full py-2 bg-white text-black font-bold rounded-xl text-xs flex items-center justify-center space-x-1.5 shadow-md active:scale-95 transition-all cursor-pointer"
+                          >
+                            <Users className="w-3.5 h-3.5" />
+                            <span>Yordamchi Qo'shish</span>
+                          </button>
+
+                          {/* Helpers list */}
+                          <div className="space-y-1.5 pt-2 border-t border-white/5">
+                            <span className="text-[10px] font-bold text-white/40 block">Yordamchilar Ro'yxati:</span>
+                            {helperAdmins.length === 0 ? (
+                              <p className="text-[10px] text-white/30 italic">Hali yordamchilar qo'shilmagan.</p>
+                            ) : (
+                              <div className="space-y-1 max-h-32 overflow-y-auto">
+                                {helperAdmins.map((username) => (
+                                  <div key={username} className="flex items-center justify-between bg-white/5 border border-white/5 rounded-lg px-2.5 py-1.5">
+                                    <span className="text-[11px] font-medium text-white/90">@{username}</span>
+                                    <button
+                                      onClick={() => handleRemoveHelper(username)}
+                                      className="text-[10px] font-bold text-red-400 hover:text-red-300 cursor-pointer px-1.5 py-0.5 rounded"
+                                    >
+                                      O'chirish
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Sub-tab: Add Group Form */}
+                      {adminTab === "add_group" && (
+                        <div className="space-y-3.5 text-xs text-slate-100">
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-white/50">Guruh/Kanal Turi *</label>
+                            <div className="grid grid-cols-2 gap-1.5">
+                              {(["channel", "group"] as const).map((t) => (
+                                <button
+                                  key={t}
+                                  type="button"
+                                  onClick={() => setNewGroupCategory(t)}
+                                  className={`py-1.5 rounded-lg border text-[9px] font-bold uppercase transition-all cursor-pointer text-center ${
+                                    newGroupCategory === t
+                                      ? "bg-amber-500 text-slate-950 border-amber-500"
+                                      : "bg-white/5 border border-white/10 text-white hover:bg-white/10"
+                                  }`}
+                                >
+                                  {t === "channel" ? "Kanal" : "Guruh"}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-white/50">Guruh/Kanal Sarlavhasi *</label>
+                            <input
+                              type="text"
+                              value={newGroupTitle}
+                              onChange={(e) => setNewGroupTitle(e.target.value)}
+                              placeholder="Fizika va Astronomiya"
+                              className="w-full bg-white text-slate-900 border border-slate-200 rounded-xl p-2.5 outline-none focus:border-amber-400 text-xs shadow-inner font-semibold"
+                            />
+                          </div>
+
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-white/50">Telegram Ssilka (Link) *</label>
+                            <input
+                              type="text"
+                              value={newGroupLink}
+                              onChange={(e) => setNewGroupLink(e.target.value)}
+                              placeholder="https://t.me/my_physics_channel"
+                              className="w-full bg-white text-slate-900 border border-slate-200 rounded-xl p-2.5 outline-none focus:border-amber-400 text-xs shadow-inner font-semibold"
+                            />
+                          </div>
+
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-white/50">Qisqacha Tavsif *</label>
+                            <textarea
+                              value={newGroupDescription}
+                              onChange={(e) => setNewGroupDescription(e.target.value)}
+                              placeholder="Ushbu kanal fizika bo'yicha eng foydali..."
+                              rows={2}
+                              className="w-full bg-white text-slate-900 border border-slate-200 rounded-xl p-2.5 outline-none focus:border-amber-400 text-xs shadow-inner resize-none font-semibold"
+                            />
+                          </div>
+
+                          <button
+                            onClick={handleAddGroup}
+                            disabled={newGroupUploading}
+                            className="w-full py-2.5 bg-amber-500 text-slate-950 font-black rounded-xl text-xs flex items-center justify-center space-x-1.5 shadow-md hover:bg-amber-600 transition-all cursor-pointer"
+                          >
+                            {newGroupUploading ? (
+                              <div className="w-3.5 h-3.5 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
+                            ) : (
+                              <Users className="w-3.5 h-3.5" />
+                            )}
+                            <span>Yangi Guruh/Kanal Qo'shish</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -2951,6 +3207,7 @@ export default function App() {
                     activeSubpage={activeSubpage} 
                     onClose={() => setActiveSubpage(null)} 
                     isAdmin={!!isAdmin} 
+                    isHelper={isHelper}
                     userId={user?.uid || ""} 
                   />
                 )}
@@ -2967,7 +3224,7 @@ export default function App() {
                     setIsDrawerOpen(false);
                   }}
                   className={`flex flex-col items-center space-y-1 py-1 px-3 rounded-xl transition-all cursor-pointer ${
-                    activeTab === "home" ? "text-[#0369a1] scale-105 font-bold" : "text-slate-400 hover:text-[#0369a1]"
+                    activeTab === "home" ? "text-white scale-105 font-bold" : "text-white/40 hover:text-white"
                   }`}
                 >
                   <div className="p-1">
@@ -2985,7 +3242,7 @@ export default function App() {
                     setIsDrawerOpen(false);
                   }}
                   className={`flex flex-col items-center space-y-1 py-1 px-3 rounded-xl transition-all cursor-pointer ${
-                    activeTab === "ustoz-ai" ? "text-[#0369a1] scale-105 font-bold" : "text-slate-400 hover:text-[#0369a1]"
+                    activeTab === "ustoz-ai" ? "text-white scale-105 font-bold" : "text-white/40 hover:text-white"
                   }`}
                 >
                   <div className="p-1">
@@ -3000,7 +3257,7 @@ export default function App() {
                     setIsDrawerOpen(false);
                   }}
                   className={`flex flex-col items-center space-y-1 py-1 px-3 rounded-xl transition-all cursor-pointer ${
-                    activeTab === "library" ? "text-[#0369a1] scale-105 font-bold" : "text-slate-400 hover:text-[#0369a1]"
+                    activeTab === "library" ? "text-white scale-105 font-bold" : "text-white/40 hover:text-white"
                   }`}
                 >
                   <div className="p-1">
@@ -3015,7 +3272,7 @@ export default function App() {
                     setIsDrawerOpen(false);
                   }}
                   className={`flex flex-col items-center space-y-1 py-1 px-3 rounded-xl transition-all cursor-pointer ${
-                    activeTab === "posts" ? "text-[#0369a1] scale-105 font-bold" : "text-slate-400 hover:text-[#0369a1]"
+                    activeTab === "posts" ? "text-white scale-105 font-bold" : "text-white/40 hover:text-white"
                   }`}
                 >
                   <div className="p-1">
@@ -3030,7 +3287,7 @@ export default function App() {
                     setIsDrawerOpen(false);
                   }}
                   className={`flex flex-col items-center space-y-1 py-1 px-3 rounded-xl transition-all cursor-pointer ${
-                    activeTab === "profile" ? "text-[#0369a1] scale-105 font-bold" : "text-slate-400 hover:text-[#0369a1]"
+                    activeTab === "profile" ? "text-white scale-105 font-bold" : "text-white/40 hover:text-white"
                   }`}
                 >
                   <div className="p-1">

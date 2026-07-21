@@ -56,10 +56,11 @@ interface SubpagesProps {
   activeSubpage: "talim" | "topgrand" | "market" | "sat" | "cefr" | "ielts" | "podcasts";
   onClose: () => void;
   isAdmin: boolean;
+  isHelper?: boolean;
   userId: string;
 }
 
-export default function Subpages({ activeSubpage, onClose, isAdmin, userId }: SubpagesProps) {
+export default function Subpages({ activeSubpage, onClose, isAdmin, isHelper = false, userId }: SubpagesProps) {
   return (
     <motion.div 
       initial={{ opacity: 0, scale: 0.98 }}
@@ -89,9 +90,9 @@ export default function Subpages({ activeSubpage, onClose, isAdmin, userId }: Su
       </div>
 
       <div className="flex-1 overflow-y-auto w-full bg-transparent">
-        {activeSubpage === "talim" && <TalimSection isAdmin={isAdmin} userId={userId} />}
+        {activeSubpage === "talim" && <TalimSection isAdmin={isAdmin} isHelper={isHelper} userId={userId} />}
         {activeSubpage === "topgrand" && <TopGrandSection userId={userId} />}
-        {activeSubpage === "podcasts" && <PodcastsSection isAdmin={isAdmin} userId={userId} />}
+        {activeSubpage === "podcasts" && <PodcastsSection isAdmin={isAdmin} isHelper={isHelper} userId={userId} />}
         {["market", "sat", "cefr", "ielts"].includes(activeSubpage) && (
           <ComingSoonSection section={activeSubpage} />
         )}
@@ -101,7 +102,7 @@ export default function Subpages({ activeSubpage, onClose, isAdmin, userId }: Su
 }
 
 // ------------------ TALIM SECTION ------------------
-function TalimSection({ isAdmin, userId }: { isAdmin: boolean; userId: string }) {
+function TalimSection({ isAdmin, isHelper = false, userId }: { isAdmin: boolean; isHelper?: boolean; userId: string }) {
   const [lessons, setLessons] = useState<Lesson[]>([]);
   const [activeLesson, setActiveLesson] = useState<Lesson | null>(null);
   
@@ -191,22 +192,22 @@ function TalimSection({ isAdmin, userId }: { isAdmin: boolean; userId: string })
   return (
     <div className="p-4 space-y-4">
       {/* Intro Banner */}
-      <div className="relative overflow-hidden rounded-3xl p-5 bg-gradient-to-r from-[#0369a1] to-sky-600 text-white shadow-md">
-        <h3 className="text-base font-extrabold flex items-center gap-1.5">
-          <BookOpen className="w-5 h-5 text-sky-200" />
-          Bepul Video Darsliklar
+      <div className="relative overflow-hidden rounded-3xl p-5 border border-white/10 bg-white/5 text-white shadow-xl">
+        <h3 className="text-sm font-extrabold flex items-center gap-1.5">
+          <BookOpen className="w-5 h-5 text-white" />
+          Professional Video Darsliklar
         </h3>
-        <p className="text-xs text-sky-100 mt-1 leading-relaxed">
-          Adminlar tomonidan joylab boriladigan oliy sifatli va bepul darslarni ko'rib, bilimingizni bepul oshiring!
+        <p className="text-xs text-white/60 mt-1 leading-relaxed">
+          Oliy sifatli va foydali darsliklar ro'yxati. Bilimingizni istalgan joyda bepul oshiring!
         </p>
       </div>
 
       {/* Admin Panel button */}
-      {isAdmin && (
+      {(isAdmin || isHelper) && (
         <div className="flex justify-end">
           <button 
             onClick={() => setShowAddForm(!showAddForm)}
-            className="flex items-center space-x-1.5 py-2 px-4 rounded-xl bg-amber-500 text-white text-xs font-bold hover:bg-amber-600 transition-all cursor-pointer shadow-sm"
+            className="flex items-center space-x-1.5 py-2 px-4 rounded-xl bg-white text-black text-xs font-bold hover:bg-white/95 transition-all cursor-pointer shadow-md"
           >
             <Plus className="w-4 h-4" />
             <span>{showAddForm ? "Yopish" : "Dars Qo'shish"}</span>
@@ -216,45 +217,45 @@ function TalimSection({ isAdmin, userId }: { isAdmin: boolean; userId: string })
 
       {/* Add lesson form modal */}
       {showAddForm && (
-        <form onSubmit={handleAddLesson} className="p-4 rounded-2xl border border-amber-200 bg-amber-50/40 text-xs space-y-3 shadow-inner">
+        <form onSubmit={handleAddLesson} className="p-4 rounded-2xl border border-white/10 bg-white/5 text-xs space-y-3 shadow-inner">
           <div className="space-y-1">
-            <label className="font-bold text-slate-700">Dars nomi *</label>
+            <label className="font-bold text-white/70">Dars nomi *</label>
             <input 
               type="text" 
               required
               value={title} 
               onChange={e => setTitle(e.target.value)}
               placeholder="Masalan: Present Perfect Continuous tushunish" 
-              className="w-full bg-white border border-amber-200 rounded-xl p-2.5 outline-none focus:border-amber-500 text-xs shadow-xs"
+              className="w-full bg-white/5 border border-white/10 rounded-xl p-2.5 outline-none focus:border-white/20 text-white text-xs"
             />
           </div>
           <div className="space-y-1">
-            <label className="font-bold text-slate-700">Dars haqida izoh (Tavsif)</label>
+            <label className="font-bold text-white/70">Dars haqida izoh (Tavsif)</label>
             <textarea 
               value={desc} 
               onChange={e => setDesc(e.target.value)}
               placeholder="Ushbu dars nimalarni o'rgatadi..." 
               rows={2}
-              className="w-full bg-white border border-amber-200 rounded-xl p-2.5 outline-none focus:border-amber-500 text-xs shadow-xs resize-none"
+              className="w-full bg-white/5 border border-white/10 rounded-xl p-2.5 outline-none focus:border-white/20 text-white text-xs resize-none"
             />
           </div>
           <div className="space-y-1">
-            <label className="font-bold text-slate-700">YouTube Video Havolasi (Link) *</label>
+            <label className="font-bold text-white/70">YouTube Video Havolasi (Link) *</label>
             <input 
               type="url" 
               required
               value={ytUrl} 
               onChange={e => setYtUrl(e.target.value)}
               placeholder="https://www.youtube.com/watch?v=..." 
-              className="w-full bg-white border border-amber-200 rounded-xl p-2.5 outline-none focus:border-amber-500 text-xs shadow-xs"
+              className="w-full bg-white/5 border border-white/10 rounded-xl p-2.5 outline-none focus:border-white/20 text-white text-xs"
             />
           </div>
           <button 
             type="submit" 
             disabled={loading}
-            className="w-full py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl text-xs flex items-center justify-center space-x-1 transition-all"
+            className="w-full py-2.5 bg-white hover:bg-white/95 text-black font-extrabold rounded-xl text-xs flex items-center justify-center space-x-1 transition-all cursor-pointer"
           >
-            {loading ? <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+            {loading ? <div className="w-3.5 h-3.5 border-2 border-black border-t-transparent rounded-full animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
             <span>Darsni Joylash</span>
           </button>
         </form>
@@ -262,7 +263,7 @@ function TalimSection({ isAdmin, userId }: { isAdmin: boolean; userId: string })
 
       {/* Active Video Player frame */}
       {activeLesson && (
-        <div className="p-3 bg-slate-900 rounded-[28px] text-white shadow-xl space-y-3 overflow-hidden border border-slate-800 animate-scale-up">
+        <div className="p-3 bg-white/5 rounded-[28px] text-white shadow-2xl space-y-3 overflow-hidden border border-white/10 animate-scale-up">
           <div className="relative aspect-video rounded-2xl overflow-hidden bg-black">
             <iframe 
               src={getYouTubeEmbedUrl(activeLesson.youtubeUrl)} 
@@ -274,25 +275,25 @@ function TalimSection({ isAdmin, userId }: { isAdmin: boolean; userId: string })
           </div>
           <div className="space-y-1 px-1">
             <div className="flex items-center justify-between">
-              <h4 className="text-sm font-bold text-slate-100">{activeLesson.title}</h4>
+              <h4 className="text-sm font-bold text-white">{activeLesson.title}</h4>
               <button 
                 onClick={() => setActiveLesson(null)} 
-                className="text-[10px] bg-slate-800 px-2.5 py-1 rounded-full text-slate-400 hover:text-white"
+                className="text-[10px] bg-white/10 px-2.5 py-1 rounded-full text-white/80 hover:text-white hover:bg-white/25 transition-all cursor-pointer"
               >
                 Yopish
               </button>
             </div>
-            <p className="text-[11px] text-slate-400 leading-relaxed">{activeLesson.description}</p>
+            <p className="text-[11px] text-white/60 leading-relaxed">{activeLesson.description}</p>
           </div>
         </div>
       )}
 
       {/* Lessons List Grid */}
       <div className="space-y-3.5">
-        <h4 className="text-xs font-bold text-slate-700 tracking-wider">Mavjud darslar ({lessons.length})</h4>
+        <h4 className="text-xs font-bold text-white/40 uppercase tracking-wider">Mavjud darslar ({lessons.length})</h4>
         {lessons.length === 0 ? (
-          <div className="p-8 text-center bg-white border border-sky-100 rounded-3xl">
-            <p className="text-xs text-slate-400 italic font-medium">Hozircha darslar mavjud emas</p>
+          <div className="p-8 text-center bg-white/5 border border-white/10 rounded-3xl">
+            <p className="text-xs text-white/40 italic font-medium">Hozircha darslar mavjud emas</p>
           </div>
         ) : (
           <div className="space-y-3">
@@ -300,20 +301,20 @@ function TalimSection({ isAdmin, userId }: { isAdmin: boolean; userId: string })
               <div 
                 key={lesson.id}
                 onClick={() => handleSelectLesson(lesson)}
-                className={`p-3 bg-white/90 border rounded-2xl flex items-center justify-between hover:border-sky-300 active:scale-[0.99] transition-all cursor-pointer shadow-xs ${
-                  activeLesson?.id === lesson.id ? "border-[#0369a1] bg-sky-50/20" : "border-sky-100/40"
+                className={`p-3 bg-white/5 border rounded-2xl flex items-center justify-between hover:bg-white/10 hover:border-white/20 active:scale-[0.99] transition-all cursor-pointer shadow-xs ${
+                  activeLesson?.id === lesson.id ? "border-white/40 bg-white/10" : "border-white/10"
                 }`}
               >
                 <div className="flex items-center space-x-3 flex-1 min-w-0">
-                  <div className="p-3 bg-sky-500/10 rounded-xl text-[#0369a1]">
-                    <Play className="w-5 h-5 fill-[#0369a1]/20" />
+                  <div className="p-3 bg-white/10 rounded-xl text-white">
+                    <Play className="w-5 h-5 fill-white/20" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <h5 className="text-xs font-bold text-slate-800 truncate leading-snug">{lesson.title}</h5>
-                    <p className="text-[10px] text-slate-400 line-clamp-1 mt-0.5 leading-relaxed">{lesson.description}</p>
-                    <div className="flex items-center space-x-2 mt-1.5 text-[9px] text-slate-400 font-semibold font-mono">
+                    <h5 className="text-xs font-bold text-white truncate leading-snug">{lesson.title}</h5>
+                    <p className="text-[10px] text-white/60 line-clamp-1 mt-0.5 leading-relaxed">{lesson.description}</p>
+                    <div className="flex items-center space-x-2 mt-1.5 text-[9px] text-white/40 font-semibold font-mono">
                       <span className="flex items-center space-x-0.5">
-                        <Eye className="w-3 h-3 text-sky-500" />
+                        <Eye className="w-3 h-3 text-white/60" />
                         <span>{lesson.viewsCount} marta</span>
                       </span>
                     </div>
@@ -323,7 +324,7 @@ function TalimSection({ isAdmin, userId }: { isAdmin: boolean; userId: string })
                 {isAdmin && (
                   <button 
                     onClick={(e) => handleDeleteLesson(lesson.id, e)}
-                    className="p-1.5 rounded-lg bg-red-50 text-red-500 hover:bg-red-100 active:scale-95 transition-all cursor-pointer ml-2"
+                    className="p-1.5 rounded-lg bg-white/5 text-white/60 hover:bg-red-500/20 hover:text-red-400 active:scale-95 transition-all cursor-pointer ml-2 border border-white/10"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -989,7 +990,7 @@ function TopGrandSection({ userId }: { userId: string }) {
 }
 
 // ------------------ PODCASTS SECTION ------------------
-function PodcastsSection({ isAdmin, userId }: { isAdmin: boolean; userId: string }) {
+function PodcastsSection({ isAdmin, isHelper = false, userId }: { isAdmin: boolean; isHelper?: boolean; userId: string }) {
   const [podcasts, setPodcasts] = useState<Podcast[]>([]);
   const [activePodcast, setActivePodcast] = useState<Podcast | null>(null);
 
@@ -1078,22 +1079,22 @@ function PodcastsSection({ isAdmin, userId }: { isAdmin: boolean; userId: string
   return (
     <div className="p-4 space-y-4">
       {/* Intro Banner */}
-      <div className="relative overflow-hidden rounded-3xl p-5 bg-gradient-to-r from-teal-600 to-emerald-500 text-white shadow-md">
-        <h3 className="text-base font-extrabold flex items-center gap-1.5">
-          <Radio className="w-5 h-5 text-teal-200 animate-pulse" />
+      <div className="relative overflow-hidden rounded-3xl p-5 border border-white/10 bg-white/5 text-white shadow-xl">
+        <h3 className="text-sm font-extrabold flex items-center gap-1.5">
+          <Radio className="w-5 h-5 text-white animate-pulse" />
           Foydali Podcastlar
         </h3>
-        <p className="text-xs text-teal-100 mt-1 leading-relaxed">
-          Ingliz tili, SAT, CEFR va nufuzli universitetlar bo'yicha ekspertlardan eksklyuziv audio-video suhbatlarni tinglang!
+        <p className="text-xs text-white/60 mt-1 leading-relaxed">
+          Ingliz tili, SAT, CEFR va nufuzli universitetlar bo'yicha ekspertlardan eksklyuziv audio-video suhbatlar.
         </p>
       </div>
 
       {/* Admin Panel button */}
-      {isAdmin && (
+      {(isAdmin || isHelper) && (
         <div className="flex justify-end">
           <button 
             onClick={() => setShowAdd(!showAdd)}
-            className="flex items-center space-x-1.5 py-2 px-4 rounded-xl bg-amber-500 text-white text-xs font-bold hover:bg-amber-600 transition-all cursor-pointer shadow-sm"
+            className="flex items-center space-x-1.5 py-2 px-4 rounded-xl bg-white text-black text-xs font-bold hover:bg-white/95 transition-all cursor-pointer shadow-md"
           >
             <Plus className="w-4 h-4" />
             <span>{showAdd ? "Yopish" : "Podcast Qo'shish"}</span>
@@ -1103,45 +1104,45 @@ function PodcastsSection({ isAdmin, userId }: { isAdmin: boolean; userId: string
 
       {/* Add podcast form modal */}
       {showAdd && (
-        <form onSubmit={handleAddPodcast} className="p-4 rounded-2xl border border-amber-200 bg-amber-50/40 text-xs space-y-3 shadow-inner">
+        <form onSubmit={handleAddPodcast} className="p-4 rounded-2xl border border-white/10 bg-white/5 text-xs space-y-3 shadow-inner">
           <div className="space-y-1">
-            <label className="font-bold text-slate-700">Podcast nomi *</label>
+            <label className="font-bold text-white/70">Podcast nomi *</label>
             <input 
               type="text" 
               required
               value={title} 
               onChange={e => setTitle(e.target.value)}
               placeholder="Masalan: IELTS 9 olish sirlari!" 
-              className="w-full bg-white border border-amber-200 rounded-xl p-2.5 outline-none focus:border-amber-500 text-xs shadow-xs"
+              className="w-full bg-white/5 border border-white/10 rounded-xl p-2.5 outline-none focus:border-white/20 text-white text-xs"
             />
           </div>
           <div className="space-y-1">
-            <label className="font-bold text-slate-700">Podcast tavsifi</label>
+            <label className="font-bold text-white/70">Podcast tavsifi</label>
             <textarea 
               value={desc} 
               onChange={e => setDesc(e.target.value)}
               placeholder="Ushbu suhbat nimalar haqida..." 
               rows={2}
-              className="w-full bg-white border border-amber-200 rounded-xl p-2.5 outline-none focus:border-amber-500 text-xs shadow-xs resize-none"
+              className="w-full bg-white/5 border border-white/10 rounded-xl p-2.5 outline-none focus:border-white/20 text-white text-xs resize-none"
             />
           </div>
           <div className="space-y-1">
-            <label className="font-bold text-slate-700">YouTube Video Havolasi (Link) *</label>
+            <label className="font-bold text-white/70">YouTube Video Havolasi (Link) *</label>
             <input 
               type="url" 
               required
               value={ytUrl} 
               onChange={e => setYtUrl(e.target.value)}
               placeholder="https://www.youtube.com/watch?v=..." 
-              className="w-full bg-white border border-amber-200 rounded-xl p-2.5 outline-none focus:border-amber-500 text-xs shadow-xs"
+              className="w-full bg-white/5 border border-white/10 rounded-xl p-2.5 outline-none focus:border-white/20 text-white text-xs"
             />
           </div>
           <button 
             type="submit" 
             disabled={loading}
-            className="w-full py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl text-xs flex items-center justify-center space-x-1 transition-all"
+            className="w-full py-2.5 bg-white hover:bg-white/95 text-black font-extrabold rounded-xl text-xs flex items-center justify-center space-x-1 transition-all cursor-pointer"
           >
-            {loading ? <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+            {loading ? <div className="w-3.5 h-3.5 border-2 border-black border-t-transparent rounded-full animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
             <span>Podcastni Joylash</span>
           </button>
         </form>
@@ -1149,7 +1150,7 @@ function PodcastsSection({ isAdmin, userId }: { isAdmin: boolean; userId: string
 
       {/* Active Podcast Player frame */}
       {activePodcast && (
-        <div className="p-3 bg-slate-900 rounded-[28px] text-white shadow-xl space-y-3 overflow-hidden border border-slate-800 animate-scale-up">
+        <div className="p-3 bg-white/5 rounded-[28px] text-white shadow-2xl space-y-3 overflow-hidden border border-white/10 animate-scale-up">
           <div className="relative aspect-video rounded-2xl overflow-hidden bg-black">
             <iframe 
               src={getYouTubeEmbedUrl(activePodcast.youtubeUrl)} 
@@ -1161,25 +1162,25 @@ function PodcastsSection({ isAdmin, userId }: { isAdmin: boolean; userId: string
           </div>
           <div className="space-y-1 px-1">
             <div className="flex items-center justify-between">
-              <h4 className="text-sm font-bold text-slate-100">{activePodcast.title}</h4>
+              <h4 className="text-sm font-bold text-white">{activePodcast.title}</h4>
               <button 
                 onClick={() => setActivePodcast(null)} 
-                className="text-[10px] bg-slate-800 px-2.5 py-1 rounded-full text-slate-400 hover:text-white"
+                className="text-[10px] bg-white/10 px-2.5 py-1 rounded-full text-white/80 hover:text-white hover:bg-white/25 transition-all cursor-pointer"
               >
                 Yopish
               </button>
             </div>
-            <p className="text-[11px] text-slate-400 leading-relaxed">{activePodcast.description}</p>
+            <p className="text-[11px] text-white/60 leading-relaxed">{activePodcast.description}</p>
           </div>
         </div>
       )}
 
       {/* Podcasts List */}
       <div className="space-y-3.5">
-        <h4 className="text-xs font-bold text-slate-700 tracking-wider">Barcha podcastlar ({podcasts.length})</h4>
+        <h4 className="text-xs font-bold text-white/40 uppercase tracking-wider">Barcha podcastlar ({podcasts.length})</h4>
         {podcasts.length === 0 ? (
-          <div className="p-8 text-center bg-white border border-sky-100 rounded-3xl">
-            <p className="text-xs text-slate-400 italic font-medium">Yo'q</p>
+          <div className="p-8 text-center bg-white/5 border border-white/10 rounded-3xl">
+            <p className="text-xs text-white/40 italic font-medium">Yo'q</p>
           </div>
         ) : (
           <div className="space-y-3">
@@ -1187,20 +1188,20 @@ function PodcastsSection({ isAdmin, userId }: { isAdmin: boolean; userId: string
               <div 
                 key={pod.id}
                 onClick={() => handleSelectPodcast(pod)}
-                className={`p-3 bg-white/90 border rounded-2xl flex items-center justify-between hover:border-emerald-300 active:scale-[0.99] transition-all cursor-pointer shadow-xs ${
-                  activePodcast?.id === pod.id ? "border-emerald-500 bg-emerald-50/10" : "border-sky-100/40"
+                className={`p-3 bg-white/5 border rounded-2xl flex items-center justify-between hover:bg-white/10 hover:border-white/20 active:scale-[0.99] transition-all cursor-pointer shadow-xs ${
+                  activePodcast?.id === pod.id ? "border-white/40 bg-white/10" : "border-white/10"
                 }`}
               >
                 <div className="flex items-center space-x-3 flex-1 min-w-0">
-                  <div className="p-3 bg-teal-500/10 rounded-xl text-teal-600">
+                  <div className="p-3 bg-white/10 rounded-xl text-white">
                     <Radio className="w-5 h-5" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <h5 className="text-xs font-bold text-slate-800 truncate leading-snug">{pod.title}</h5>
-                    <p className="text-[10px] text-slate-400 line-clamp-1 mt-0.5 leading-relaxed">{pod.description}</p>
-                    <div className="flex items-center space-x-2 mt-1.5 text-[9px] text-slate-400 font-semibold font-mono">
+                    <h5 className="text-xs font-bold text-white truncate leading-snug">{pod.title}</h5>
+                    <p className="text-[10px] text-white/60 line-clamp-1 mt-0.5 leading-relaxed">{pod.description}</p>
+                    <div className="flex items-center space-x-2 mt-1.5 text-[9px] text-white/40 font-semibold font-mono">
                       <span className="flex items-center space-x-0.5">
-                        <Eye className="w-3 h-3 text-teal-500" />
+                        <Eye className="w-3 h-3 text-white/60" />
                         <span>{pod.viewsCount} marta ko'rildi</span>
                       </span>
                     </div>
@@ -1210,7 +1211,7 @@ function PodcastsSection({ isAdmin, userId }: { isAdmin: boolean; userId: string
                 {isAdmin && (
                   <button 
                     onClick={(e) => handleDeletePodcast(pod.id, e)}
-                    className="p-1.5 rounded-lg bg-red-50 text-red-500 hover:bg-red-100 active:scale-95 transition-all cursor-pointer ml-2"
+                    className="p-1.5 rounded-lg bg-white/5 text-white/60 hover:bg-red-500/20 hover:text-red-400 active:scale-95 transition-all cursor-pointer ml-2 border border-white/10"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>

@@ -1,6 +1,6 @@
 {
   "name": "EduVerse AI",
-  "description": "Mobil qurilmalar uchun moslashtirilgan sun'iy intellekt ta'lim platformasi: Ustoz AI ovozli muloqot va chat, o'yinlashtirilgan EduCoin tizimi va shaffof zamonaviy dizayn.",
+  "description": "Mobil qurilmalar uchun moslashtirilgan sun'iy intellekt ta'lim platformasi: Ustoz AI ovozli muloqot va chat, kitoblar, ta'lim darslari va shaffof zamonaviy Apple dizayni.",
   "requestFramePermissions": ["microphone"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
